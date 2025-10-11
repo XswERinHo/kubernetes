@@ -1,0 +1,14 @@
+# Pliki systemowe
+.DS_Store
+
+# Logi
+*.log
+
+# Frontend - ignoruj wszystkie zależności
+/frontend/node_modules
+/frontend/dist
+
+# Backend - ignoruj skompilowaną binarkę
+# (nazwa może być inna w zależności od systemu)
+/backend/backend.exe
+/backend/backend
