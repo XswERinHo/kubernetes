@@ -2,27 +2,70 @@ import { useState, useEffect } from 'react';
 import './App.css';
 
 function App() {
-  // 'useState' tworzy "pudełko" w pamięci komponentu do przechowywania danych
-  const [message, setMessage] = useState('Loading...');
+  // Zmieniamy stan: zamiast 'message' będziemy przechowywać listę (tablicę) wdrożeń
+  const [deployments, setDeployments] = useState([]);
+  const [error, setError] = useState(null);
 
-  // 'useEffect' uruchamia kod po pierwszym wyrenderowaniu komponentu
   useEffect(() => {
-    // Używamy 'fetch', aby wysłać zapytanie do naszego backendu
-    fetch('/api/health')
-      .then((response) => response.text()) // Oczekujemy odpowiedzi tekstowej
-      .then((data) => setMessage(data)) // Zapisujemy odpowiedź w naszym "pudełku"
+    // Zmieniamy endpoint: zamiast '/api/health' odpytujemy '/api/deployments'
+    fetch('/api/deployments')
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error('Network response was not ok');
+        }
+        return response.json(); // Oczekujemy odpowiedzi w formacie JSON
+      })
+      .then((data) => {
+        setDeployments(data); // Zapisujemy tablicę wdrożeń w naszym stanie
+      })
       .catch((error) => {
         console.error('Error fetching data:', error);
-        setMessage('Failed to load data from API');
+        setError(error.message);
       });
-  }, []); // Pusta tablica [] oznacza, że efekt uruchomi się tylko raz
+  }, []);
 
+  // Prosta obsługa błędów
+  if (error) {
+    return (
+      <>
+        <h1>K8s Resource Manager</h1>
+        <div className="card">
+          <h2>Error:</h2>
+          <p>{error}</p>
+        </div>
+      </>
+    );
+  }
+
+  // Nowy JSX do wyświetlania danych
   return (
     <>
-      <h1>Vite + React + Go</h1>
+      <h1>K8s Resource Manager</h1>
       <div className="card">
-        <h2>Message from API:</h2>
-        <p>{message}</p>
+        <h2>Deployments</h2>
+        {/* Sprawdzamy, czy lista jest pusta */}
+        {deployments.length === 0 ? (
+          <p>No deployments found in cluster.</p>
+        ) : (
+          // Jeśli lista nie jest pusta, tworzymy tabelę
+          <table style={{ width: '100%', textAlign: 'left' }}>
+            <thead>
+              <tr>
+                <th>Namespace</th>
+                <th>Name</th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* Używamy .map() aby zamienić każdy obiekt z listy na wiersz tabeli */}
+              {deployments.map((deployment) => (
+                <tr key={deployment.name}>
+                  <td>{deployment.namespace}</td>
+                  <td>{deployment.name}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </>
   );
