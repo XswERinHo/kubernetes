@@ -1,73 +1,101 @@
 import { useState, useEffect } from 'react';
 import './App.css';
 
+// --- NOWA FUNKCJA POMOCNICZA DO FORMATOWANIA BAJTÓW ---
+// Konwertuje bajty na bardziej czytelny format (KB, MB, GB)
+function formatBytes(bytes, decimals = 2) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+// --- KONIEC FUNKCJI POMOCNICZEJ ---
+
 function App() {
-  // Zmieniamy stan: zamiast 'message' będziemy przechowywać listę (tablicę) wdrożeń
   const [deployments, setDeployments] = useState([]);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    // Zmieniamy endpoint: zamiast '/api/health' odpytujemy '/api/deployments'
     fetch('/api/deployments')
       .then((response) => {
         if (!response.ok) {
-          throw new Error('Network response was not ok');
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
-        return response.json(); // Oczekujemy odpowiedzi w formacie JSON
+        return response.json();
       })
       .then((data) => {
-        setDeployments(data); // Zapisujemy tablicę wdrożeń w naszym stanie
+        setDeployments(data || []);
       })
       .catch((error) => {
         console.error('Error fetching data:', error);
-        setError(error.message);
+        setError(`Failed to load deployments: ${error.message}`);
       });
   }, []);
 
-  // Prosta obsługa błędów
   if (error) {
-    return (
-      <>
+    // ... (obsługa błędów bez zmian)
+     return (
+      <div className="App">
         <h1>K8s Resource Manager</h1>
-        <div className="card">
-          <h2>Error:</h2>
+        <div className="card error-card">
+          <h2>Error Loading Data</h2>
           <p>{error}</p>
         </div>
-      </>
+      </div>
     );
   }
 
-  // Nowy JSX do wyświetlania danych
+  const tableStyle = { /* ... (style bez zmian) */ width: '100%', borderCollapse: 'collapse', marginTop: '20px', };
+  const thStyle = { /* ... (style bez zmian) */ borderBottom: '2px solid #646cff', padding: '12px 15px', textAlign: 'left', backgroundColor: '#3a3a3a', };
+  const tdStyle = { /* ... (style bez zmian) */ borderBottom: '1px solid #444', padding: '10px 15px', };
+
   return (
-    <>
+    <div className="App">
       <h1>K8s Resource Manager</h1>
       <div className="card">
         <h2>Deployments</h2>
-        {/* Sprawdzamy, czy lista jest pusta */}
         {deployments.length === 0 ? (
-          <p>No deployments found in cluster.</p>
+          <p>Loading deployments or none found in cluster...</p>
         ) : (
-          // Jeśli lista nie jest pusta, tworzymy tabelę
-          <table style={{ width: '100%', textAlign: 'left' }}>
-            <thead>
-              <tr>
-                <th>Namespace</th>
-                <th>Name</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Używamy .map() aby zamienić każdy obiekt z listy na wiersz tabeli */}
-              {deployments.map((deployment) => (
-                <tr key={deployment.name}>
-                  <td>{deployment.namespace}</td>
-                  <td>{deployment.name}</td>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Namespace</th>
+                  <th style={thStyle}>Name</th>
+                  <th style={thStyle}>CPU Req.</th>
+                  <th style={thStyle}>CPU Lim.</th>
+                  {/* NOWY NAGŁÓWEK ZUŻYCIA CPU */}
+                  <th style={thStyle}>CPU Usage</th>
+                  <th style={thStyle}>Mem Req.</th>
+                  <th style={thStyle}>Mem Lim.</th>
+                  {/* NOWY NAGŁÓWEK ZUŻYCIA PAMIĘCI */}
+                  <th style={thStyle}>Mem Usage</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {deployments.map((deployment) => (
+                  <tr key={`${deployment.namespace}-${deployment.name}`}>
+                    <td style={tdStyle}>{deployment.namespace}</td>
+                    <td style={tdStyle}>{deployment.name}</td>
+                    <td style={tdStyle}>{deployment.cpuRequests || '-'}</td>
+                    <td style={tdStyle}>{deployment.cpuLimits || '-'}</td>
+                    {/* NOWA KOMÓRKA - WYŚWIETLAMY ZUŻYCIE CPU W MILICPU */}
+                    <td style={tdStyle}>{deployment.currentCpuUsage}m</td>
+                    <td style={tdStyle}>{deployment.memoryRequests || '-'}</td>
+                    <td style={tdStyle}>{deployment.memoryLimits || '-'}</td>
+                    {/* NOWA KOMÓRKA - UŻYWAMY FUNKCJI formatBytes */}
+                    <td style={tdStyle}>{formatBytes(deployment.currentMemoryUsage)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
-    </>
+    </div>
   );
 }
 
