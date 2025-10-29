@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log" // Potrzebne do zaokrąglania procentów
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,7 +18,7 @@ import (
 	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
-// --- STRUKTURA ROZBUDOWANA O REKOMENDACJE ---
+// Definicja struktury bez zmian
 type DeploymentInfo struct {
 	Name            string   `json:"name"`
 	Namespace       string   `json:"namespace"`
@@ -26,16 +26,20 @@ type DeploymentInfo struct {
 	CpuLimits       string   `json:"cpuLimits"`
 	MemoryRequests  string   `json:"memoryRequests"`
 	MemoryLimits    string   `json:"memoryLimits"`
-	CurrentCpuUsage int64    `json:"currentCpuUsage"`    // w milicpu
-	CurrentMemUsage int64    `json:"currentMemoryUsage"` // w bajtach
-	Recommendations []string `json:"recommendations"`    // NOWE POLE: Lista stringów z rekomendacjami
+	CurrentCpuUsage int64    `json:"currentCpuUsage"`
+	CurrentMemUsage int64    `json:"currentMemoryUsage"`
+	Recommendations []string `json:"recommendations"`
 }
 
 var clientset *kubernetes.Clientset
 var metricsClientset *metricsclientset.Clientset
 
+// Definicja minimalnych progów dla rekomendacji zmniejszenia
+var minCpuRequestMilli int64 = 50               // 50m
+var minMemRequestBytes int64 = 64 * 1024 * 1024 // 64Mi
+
 func main() {
-	// ... (inicjalizacja clientset i metricsClientset bez zmian)
+	// ... (inicjalizacja clientset i metricsClientset bez zmian) ...
 	kubeconfigPath := filepath.Join(os.Getenv("USERPROFILE"), ".kube", "config")
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
@@ -54,7 +58,7 @@ func main() {
 	http.HandleFunc("/api/deployments", deploymentsHandler)
 
 	fmt.Println("Starting server on port 8080...")
-	// ... (reszta bez zmian)
+	// ... (reszta bez zmian) ...
 	fmt.Println("Backend połączony z Kubernetesem. Dostępne endpointy:")
 	fmt.Println("http://localhost:8080/api/health")
 	fmt.Println("http://localhost:8080/api/deployments")
@@ -63,7 +67,6 @@ func main() {
 	}
 }
 
-// --- deploymentsHandler Z DODANĄ LOGIKĄ REKOMENDACJI ---
 func deploymentsHandler(w http.ResponseWriter, r *http.Request) {
 	deployments, err := clientset.AppsV1().Deployments("").List(context.Background(), metav1.ListOptions{})
 	if err != nil {
@@ -77,38 +80,38 @@ func deploymentsHandler(w http.ResponseWriter, r *http.Request) {
 		var cpuReqTotal, cpuLimTotal, memReqTotal, memLimTotal resource.Quantity
 		var currentCpuUsage int64
 		var currentMemUsage int64
-		var recommendations []string // Lista na rekomendacje dla tego wdrożenia
+		var recommendations []string
+		hasCpuReq, hasMemReq, hasCpuLim, hasMemLim := false, false, false, false
 
 		// --- Odczyt Requests/Limits ---
-		hasCpuReq, hasMemReq, hasCpuLim, hasMemLim := false, false, false, false
+		// (Logika odczytu bez zmian, tylko używa Value() > 0)
 		for _, container := range deployment.Spec.Template.Spec.Containers {
-			if reqCpu, ok := container.Resources.Requests[corev1.ResourceCPU]; ok && !reqCpu.IsZero() {
+			if reqCpu, ok := container.Resources.Requests[corev1.ResourceCPU]; ok && reqCpu.Value() > 0 {
 				cpuReqTotal.Add(reqCpu)
 				hasCpuReq = true
 			}
-			if reqMem, ok := container.Resources.Requests[corev1.ResourceMemory]; ok && !reqMem.IsZero() {
+			if reqMem, ok := container.Resources.Requests[corev1.ResourceMemory]; ok && reqMem.Value() > 0 {
 				memReqTotal.Add(reqMem)
 				hasMemReq = true
 			}
-			if limCpu, ok := container.Resources.Limits[corev1.ResourceCPU]; ok && !limCpu.IsZero() {
+			if limCpu, ok := container.Resources.Limits[corev1.ResourceCPU]; ok && limCpu.Value() > 0 {
 				cpuLimTotal.Add(limCpu)
 				hasCpuLim = true
 			}
-			if limMem, ok := container.Resources.Limits[corev1.ResourceMemory]; ok && !limMem.IsZero() {
+			if limMem, ok := container.Resources.Limits[corev1.ResourceMemory]; ok && limMem.Value() > 0 {
 				memLimTotal.Add(limMem)
 				hasMemLim = true
 			}
 		}
 
 		// --- Pobieranie metryk ---
-		// ... (logika pobierania metryk bez zmian) ...
+		// (Logika pobierania metryk bez zmian)
 		selector := labels.Set(deployment.Spec.Selector.MatchLabels).String()
 		pods, err := clientset.CoreV1().Pods(deployment.Namespace).List(context.Background(), metav1.ListOptions{LabelSelector: selector})
 		if err != nil {
 			log.Printf("Błąd pobierania Podów dla %s/%s: %v", deployment.Namespace, deployment.Name, err)
 		} else {
 			for _, pod := range pods.Items {
-				// Sprawdzamy, czy Pod jest Running, bo tylko takie mają sensowne metryki
 				if pod.Status.Phase != corev1.PodRunning {
 					continue
 				}
@@ -124,19 +127,61 @@ func deploymentsHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// --- NOWA LOGIKA GENEROWANIA REKOMENDACJI ---
-		// 1. Sprawdzenie brakujących definicji
+		// --- BARDZIEJ INTELIGENTNA LOGIKA REKOMENDACJI ---
+
+		// 1. Sprawdzenie brakujących definicji (logika bez zmian)
 		if !hasCpuReq || !hasMemReq {
 			recommendations = append(recommendations, "Krytyczne: Brak zdefiniowanych żądań (requests) CPU lub Pamięci!")
 		}
-		if !hasCpuLim || !hasMemLim {
-			recommendations = append(recommendations, "Ostrzeżenie: Brak zdefiniowanych limitów (limits) CPU lub Pamięci!")
+		if !hasCpuLim && !hasMemLim {
+			recommendations = append(recommendations, "Ostrzeżenie: Brak zdefiniowanych limitów (limits) CPU i Pamięci!")
+		} else {
+			if !hasCpuLim {
+				recommendations = append(recommendations, "Ostrzeżenie: Brak zdefiniowanego limitu (limits) CPU!")
+			}
+			if !hasMemLim {
+				recommendations = append(recommendations, "Ostrzeżenie: Brak zdefiniowanego limitu (limits) Pamięci!")
+			}
 		}
 
-		// 2. Proste sprawdzenie przewymiarowania CPU (jeśli są żądania i mamy dane o zużyciu)
-		// Sprawdzamy, czy zużycie CPU jest mniejsze niż 10% żądanych
-		if hasCpuReq && currentCpuUsage > 0 && float64(currentCpuUsage) < 0.1*float64(cpuReqTotal.MilliValue()) {
-			recommendations = append(recommendations, fmt.Sprintf("Info: Niskie zużycie CPU (%dm) w porównaniu do żądanych (%s). Rozważ zmniejszenie żądań.", currentCpuUsage, cpuReqTotal.String()))
+		// Konwersja na wartości liczbowe dla łatwiejszych obliczeń
+		cpuReqMilli := cpuReqTotal.MilliValue()
+		memReqBytes := memReqTotal.Value()
+		cpuLimMilli := cpuLimTotal.MilliValue()
+		memLimBytes := memLimTotal.Value()
+
+		// 2. Sprawdzenie przewymiarowania (Over-provisioning) z procentami i progiem minimalnym
+		if hasCpuReq && cpuReqMilli > 0 {
+			usageRatio := float64(currentCpuUsage) / float64(cpuReqMilli)
+			// Rekomenduj zmniejszenie tylko jeśli zużycie < 30% ORAZ żądanie > minimum
+			if currentCpuUsage > 0 && usageRatio < 0.3 && cpuReqMilli > minCpuRequestMilli {
+				recommendations = append(recommendations, fmt.Sprintf("Info: Niskie zużycie CPU (%dm - %.0f%% żądanych %s). Rozważ zmniejszenie żądań.", currentCpuUsage, usageRatio*100, cpuReqTotal.String()))
+			}
+		}
+		if hasMemReq && memReqBytes > 0 {
+			usageRatio := float64(currentMemUsage) / float64(memReqBytes)
+			// Rekomenduj zmniejszenie tylko jeśli zużycie < 30% ORAZ żądanie > minimum
+			if currentMemUsage > 0 && usageRatio < 0.3 && memReqBytes > minMemRequestBytes {
+				recommendations = append(recommendations, fmt.Sprintf("Info: Niskie zużycie Pamięci (%s - %.0f%% żądanej %s). Rozważ zmniejszenie żądań.", formatBytesTrim(currentMemUsage), usageRatio*100, memReqTotal.String()))
+			}
+		}
+
+		// 3. Sprawdzenie wysokiego zużycia (Under-provisioning) w stosunku do limitów z procentami
+		if hasCpuLim && cpuLimMilli > 0 {
+			usageRatio := float64(currentCpuUsage) / float64(cpuLimMilli)
+			// Ostrzegaj, gdy zużycie > 90% limitu
+			if usageRatio > 0.9 {
+				recommendations = append(recommendations, fmt.Sprintf("Ostrzeżenie: Wysokie zużycie CPU (%dm - %.0f%% limitu %s)! Może wystąpić throttling.", currentCpuUsage, usageRatio*100, cpuLimTotal.String()))
+			}
+		}
+		if hasMemLim && memLimBytes > 0 {
+			usageRatio := float64(currentMemUsage) / float64(memLimBytes)
+			// Ostrzegaj (krytycznie), gdy zużycie > 90% limitu
+			if usageRatio > 0.9 {
+				recommendations = append(recommendations, fmt.Sprintf("Krytyczne: Wysokie zużycie Pamięci (%s - %.0f%% limitu %s)! Ryzyko OOMKilled!", formatBytesTrim(currentMemUsage), usageRatio*100, memLimTotal.String()))
+			} else if usageRatio > 0.8 { // Dodatkowe ostrzeżenie dla > 80%
+				recommendations = append(recommendations, fmt.Sprintf("Ostrzeżenie: Zużycie Pamięci (%s - %.0f%% limitu %s) jest wysokie.", formatBytesTrim(currentMemUsage), usageRatio*100, memLimTotal.String()))
+			}
 		}
 		// --- KONIEC LOGIKI REKOMENDACJI ---
 
@@ -149,7 +194,7 @@ func deploymentsHandler(w http.ResponseWriter, r *http.Request) {
 			MemoryLimits:    memLimTotal.String(),
 			CurrentCpuUsage: currentCpuUsage,
 			CurrentMemUsage: currentMemUsage,
-			Recommendations: recommendations, // Dodajemy listę rekomendacji
+			Recommendations: recommendations,
 		})
 	}
 
@@ -157,4 +202,29 @@ func deploymentsHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(deploymentInfos); err != nil {
 		http.Error(w, fmt.Sprintf("Błąd kodowania JSON: %v", err), http.StatusInternalServerError)
 	}
+}
+
+// Funkcja formatBytesTrim bez zmian
+func formatBytesTrim(bytes int64, decimals ...int) string {
+	// ... (kod funkcji bez zmian) ...
+	if bytes == 0 {
+		return "0B"
+	}
+	k := int64(1024)
+	dec := 1
+	if len(decimals) > 0 && decimals[0] >= 0 {
+		dec = decimals[0]
+	}
+	sizes := []string{"B", "KB", "MB", "GB", "TB"}
+	i := 0
+	b := float64(bytes)
+	for b >= float64(k) && i < len(sizes)-1 {
+		b /= float64(k)
+		i++
+	}
+	format := fmt.Sprintf("%%.%df%%s", dec)
+	if b == float64(int64(b)) {
+		format = "%.0f%s"
+	}
+	return fmt.Sprintf(format, b, sizes[i])
 }
