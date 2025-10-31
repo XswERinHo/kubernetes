@@ -34,8 +34,8 @@ type DeploymentInfo struct {
 	CpuLimits       string   `json:"cpuLimits"`
 	MemoryRequests  string   `json:"memoryRequests"`
 	MemoryLimits    string   `json:"memoryLimits"`
-	CurrentCpuUsage int64    `json:"avgCpuUsage"`
-	CurrentMemUsage int64    `json:"avgMemoryUsage"`
+	CurrentCpuUsage int64    `json:"avgCpuUsage"`    // Aktualne/średnie zużycie (dla tabeli)
+	CurrentMemUsage int64    `json:"avgMemoryUsage"` // Aktualne/średnie zużycie (dla tabeli)
 	Recommendations []string `json:"recommendations"`
 }
 
@@ -47,11 +47,36 @@ type ResourceUpdateRequest struct {
 	MemoryLimits   *string `json:"memoryLimits,omitempty"`
 }
 
+// Struktura dla wykresów (bez zmian)
+type MetricPoint struct {
+	Timestamp int64   `json:"timestamp"`
+	Value     float64 `json:"value"`
+}
+type MetricHistory struct {
+	CpuUsage    []MetricPoint `json:"cpuUsage"`
+	MemoryUsage []MetricPoint `json:"memoryUsage"`
+}
+
 // Globalne zmienne i progi (bez zmian)
 var clientset *kubernetes.Clientset
 var promAPI prometheusv1.API
 var minCpuRequestMilli int64 = 50
 var minMemRequestBytes int64 = 64 * 1024 * 1024 // 64Mi
+
+// --- ZAKTUALIZOWANE ZMIENNE GLOBALNE DLA ZAPYTAŃ ---
+
+// Zapytania o ŚREDNIE/AKTUALNE zużycie (dla tabeli i wykresów)
+const avgCpuQueryTemplate = `sum(rate(container_cpu_usage_seconds_total%s[5m])) * 1000`
+const avgMemQueryTemplate = `sum(container_memory_working_set_bytes%s)`
+
+// NOWE Zapytania o 95. PERCENTYL z 7 DNI (dla REKOMENDACJI)
+// Używamy max_over_time, aby złapać szczytowe użycie *w danej chwili* (rate[5m]), a następnie bierzemy z tego 95. percentyl
+const p95CpuQueryTemplate = `quantile_over_time(0.95, (sum(rate(container_cpu_usage_seconds_total%s[5m])) * 1000)[7d:5m])`
+
+// Dla pamięci bierzemy 95. percentyl z maksymalnego użycia w 5-minutowych okresach
+const p95MemQueryTemplate = `quantile_over_time(0.95, (sum(container_memory_working_set_bytes%s))[7d:5m])`
+
+// --- KONIEC ZAKTUALIZOWANYCH ZMIENNYCH ---
 
 func main() {
 	// Inicjalizacja K8s (bez zmian)
@@ -65,7 +90,7 @@ func main() {
 		log.Fatalf("Błąd tworzenia clientset: %s", err.Error())
 	}
 
-	// Inicjalizacja Prometheusa
+	// Inicjalizacja Prometheusa (bez zmian)
 	promClient, err := api.NewClient(api.Config{
 		Address: "http://localhost:30090",
 	})
@@ -83,29 +108,34 @@ func main() {
 			http.Error(w, "Metoda niedozwolona", http.StatusMethodNotAllowed)
 		}
 	})
+
 	http.HandleFunc("/api/deployments/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/resources") {
 			updateDeploymentResourcesHandler(w, r)
-		} else {
-			http.NotFound(w, r)
+			return
 		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/metrics") {
+			metricsHandler(w, r)
+			return
+		}
+		http.NotFound(w, r)
 	})
 
-	// Uruchomienie serwera
+	// Uruchomienie serwera (bez zmian)
 	fmt.Println("Starting server on port 8080...")
 	fmt.Println("Backend połączony z Kubernetesem I Prometheusem (przez http://localhost:30090).")
+	fmt.Println("GET http://localhost:8080/api/deployments/{namespace}/{name}/metrics")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// --- OSTATECZNIE POPRAWIONA FUNKCJA buildPrometheusSelector ---
-// Usunięto filtr `container!=""`, ponieważ w tej konfiguracji powoduje on odfiltrowanie wszystkich wyników.
+// buildPrometheusSelector (bez zmian)
 func buildPrometheusSelector(namespace, deploymentName string) string {
 	return fmt.Sprintf(`{namespace="%s", pod=~"%s-.*"}`, namespace, deploymentName)
 }
 
-// deploymentsHandler - ZOSTATECZNIE POPRAWIONA WERSJA Z DZIAŁAJĄCYMI ZAPYTANIAMI
+// deploymentsHandler - ZMODYFIKOWANA LOGIKA REKOMENDACJI
 func deploymentsHandler(w http.ResponseWriter, _ *http.Request) {
 	deployments, err := clientset.AppsV1().Deployments("").List(context.Background(), metav1.ListOptions{})
 	if err != nil {
@@ -113,22 +143,18 @@ func deploymentsHandler(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	// --- OSTATECZNIE POPRAWIONE, DZIAŁAJĄCE SZABLONY ZAPYTAŃ ---
-	const cpuQueryTemplate = `sum(rate(container_cpu_usage_seconds_total%s[5m])) * 1000`
-	const memQueryTemplate = `sum(container_memory_working_set_bytes%s)`
-	// --- KONIEC ZMIAN ---
-
 	var deploymentInfos []DeploymentInfo
 
 	for _, deployment := range deployments.Items {
 		var cpuReqTotal, cpuLimTotal, memReqTotal, memLimTotal resource.Quantity
-		var avgCpuUsage int64
-		var avgMemUsage int64
+		var avgCpuUsage, avgMemUsage int64 // Dla tabeli
+		var p95CpuUsage, p95MemUsage int64 // Dla rekomendacji
 		var recommendations []string
 		hasCpuReq, hasMemReq, hasCpuLim, hasMemLim := false, false, false, false
 
 		// Odczyt Requests/Limits (bez zmian)
 		for _, container := range deployment.Spec.Template.Spec.Containers {
+			// ... (logika bez zmian) ...
 			if reqCpu, ok := container.Resources.Requests[corev1.ResourceCPU]; ok && reqCpu.Value() > 0 {
 				cpuReqTotal.Add(reqCpu)
 				hasCpuReq = true
@@ -147,22 +173,23 @@ func deploymentsHandler(w http.ResponseWriter, _ *http.Request) {
 			}
 		}
 
-		// --- LOGIKA POBIERANIA METRYK ---
+		// --- ZMODYFIKOWANA LOGIKA POBIERANIA METRYK ---
 		selectorString := buildPrometheusSelector(deployment.Namespace, deployment.Name)
-		// log.Printf("Selektor dla %s/%s: %s", deployment.Namespace, deployment.Name, selectorString) // ZAKOMENTOWANO
 
-		// Zapytanie o CPU
-		cpuQuery := fmt.Sprintf(cpuQueryTemplate, selectorString)
-		avgCpuUsage = queryPrometheusScalar(cpuQuery)
+		// 1. Pobierz ŚREDNIE/AKTUALNE zużycie (dla tabeli)
+		avgCpuQuery := fmt.Sprintf(avgCpuQueryTemplate, selectorString)
+		avgCpuUsage = queryPrometheusScalar(avgCpuQuery)
+		avgMemQuery := fmt.Sprintf(avgMemQueryTemplate, selectorString)
+		avgMemUsage = queryPrometheusScalar(avgMemQuery)
 
-		// Zapytanie o Pamięć
-		memQuery := fmt.Sprintf(memQueryTemplate, selectorString)
-		avgMemUsage = queryPrometheusScalar(memQuery)
-
-		// log.Printf("Wynik końcowy dla %s/%s -> CPU: %d, Mem: %d", deployment.Namespace, deployment.Name, avgCpuUsage, avgMemUsage) // ZAKOMENTOWANO
+		// 2. Pobierz 95. PERCENTYL z 7 DNI (dla rekomendacji)
+		p95CpuQuery := fmt.Sprintf(p95CpuQueryTemplate, selectorString)
+		p95CpuUsage = queryPrometheusScalar(p95CpuQuery)
+		p95MemQuery := fmt.Sprintf(p95MemQueryTemplate, selectorString)
+		p95MemUsage = queryPrometheusScalar(p95MemQuery)
 		// --- KONIEC LOGIKI PROMETHEUSA ---
 
-		// Logika Rekomendacji (bez zmian)
+		// --- ZMODYFIKOWANA LOGIKA REKOMENDACJI ---
 		if !hasCpuReq || !hasMemReq {
 			recommendations = append(recommendations, "Krytyczne: Brak zdefiniowanych żądań (requests) CPU lub Pamięci!")
 		}
@@ -180,23 +207,34 @@ func deploymentsHandler(w http.ResponseWriter, _ *http.Request) {
 		memReqBytes := memReqTotal.Value()
 		cpuLimMilli := cpuLimTotal.MilliValue()
 		memLimBytes := memLimTotal.Value()
-		if hasCpuReq && avgCpuUsage > 0 && cpuReqMilli > 0 {
-			usageRatio := float64(avgCpuUsage) / float64(cpuReqMilli)
+
+		// Rekomendacja CPU: Użyj P95 (p95CpuUsage), a nie avgCpuUsage
+		if hasCpuReq && p95CpuUsage > 0 && cpuReqMilli > 0 {
+			usageRatio := float64(p95CpuUsage) / float64(cpuReqMilli)
+			// Zmniejsz, jeśli P95 < 30% requestu (i request > min)
 			if usageRatio < 0.3 && cpuReqMilli > minCpuRequestMilli {
-				suggestedCpuMilli := int64(math.Max(float64(minCpuRequestMilli), math.Ceil(float64(avgCpuUsage)*1.5/10.0)*10.0))
+				// Sugeruj P95 * 1.5 (z buforem), zaokrąglone w górę do 10m, nie mniej niż minimum
+				suggestedCpuMilli := int64(math.Max(float64(minCpuRequestMilli), math.Ceil(float64(p95CpuUsage)*1.5/10.0)*10.0))
 				suggestedCpuString := fmt.Sprintf("%dm", suggestedCpuMilli)
-				recommendations = append(recommendations, fmt.Sprintf("Info (5m avg): Niskie zużycie CPU (%dm - %.0f%% żądanych %s). Rozważ zmniejszenie żądań do %s.", avgCpuUsage, usageRatio*100, cpuReqTotal.String(), suggestedCpuString))
+				recommendations = append(recommendations, fmt.Sprintf("Info (7d p95): Niskie zużycie CPU (%dm - %.0f%% żądanych %s). Rozważ zmniejszenie żądań do %s.", p95CpuUsage, usageRatio*100, cpuReqTotal.String(), suggestedCpuString))
 			}
 		}
-		if hasMemReq && avgMemUsage > 0 && memReqBytes > 0 {
-			usageRatio := float64(avgMemUsage) / float64(memReqBytes)
+
+		// Rekomendacja Pamięci: Użyj P95 (p95MemUsage), a nie avgMemUsage
+		if hasMemReq && p95MemUsage > 0 && memReqBytes > 0 {
+			usageRatio := float64(p95MemUsage) / float64(memReqBytes)
+			// Zmniejsz, jeśli P95 < 30% requestu (i request > min)
 			if usageRatio < 0.3 && memReqBytes > minMemRequestBytes {
-				suggestedMemBytes := int64(math.Max(float64(minMemRequestBytes), float64(avgMemUsage)*1.5))
-				suggestedMemMiB := int64(math.Ceil(float64(suggestedMemBytes) / (1024 * 1024)))
+				// Sugeruj P95 * 1.5 (z buforem), nie mniej niż minimum
+				suggestedMemBytes := int64(math.Max(float64(minMemRequestBytes), float64(p95MemUsage)*1.5))
+				suggestedMemMiB := int64(math.Ceil(float64(suggestedMemBytes) / (1024 * 1024))) // Zaokrąglij w górę
 				suggestedMemString := fmt.Sprintf("%dMi", suggestedMemMiB)
-				recommendations = append(recommendations, fmt.Sprintf("Info (aktualne): Niskie zużycie Pamięci (%s - %.0f%% żądanej %s). Rozważ zmniejszenie żądań do %s.", formatBytesTrim(avgMemUsage), usageRatio*100, memReqTotal.String(), suggestedMemString))
+				recommendations = append(recommendations, fmt.Sprintf("Info (7d p95): Niskie zużycie Pamięci (%s - %.0f%% żądanej %s). Rozważ zmniejszenie żądań do %s.", formatBytesTrim(p95MemUsage), usageRatio*100, memReqTotal.String(), suggestedMemString))
 			}
 		}
+
+		// Rekomendacje dot. limitów: Użyj AKTUALNEGO zużycia (avgCpuUsage / avgMemUsage)
+		// Ostrzegamy o *aktualnym* ryzyku throttlingu lub OOMKilled
 		if hasCpuLim && cpuLimMilli > 0 && float64(avgCpuUsage) > 0.9*float64(cpuLimMilli) {
 			recommendations = append(recommendations, fmt.Sprintf("Ostrzeżenie (5m avg): Średnie zużycie CPU (%dm - %.0f%% limitu %s) bliskie limitu! Może wystąpić throttling.", avgCpuUsage, (float64(avgCpuUsage)/float64(cpuLimMilli))*100, cpuLimTotal.String()))
 		}
@@ -209,6 +247,7 @@ func deploymentsHandler(w http.ResponseWriter, _ *http.Request) {
 			}
 		}
 
+		// Zwróć AVG (aktualne) zużycie do tabeli
 		deploymentInfos = append(deploymentInfos, DeploymentInfo{Name: deployment.Name, Namespace: deployment.Namespace, CpuRequests: cpuReqTotal.String(), CpuLimits: cpuLimTotal.String(), MemoryRequests: memReqTotal.String(), MemoryLimits: memLimTotal.String(), CurrentCpuUsage: avgCpuUsage, CurrentMemUsage: avgMemUsage, Recommendations: recommendations})
 	}
 
@@ -220,8 +259,15 @@ func deploymentsHandler(w http.ResponseWriter, _ *http.Request) {
 
 // queryPrometheusScalar (bez zmian)
 func queryPrometheusScalar(query string) int64 {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Standardowy timeout dla szybkich zapytań
 	defer cancel()
+
+	// Zwiększamy timeout dla zapytań historycznych
+	if strings.Contains(query, "[7d:5m]") {
+		ctx, cancel = context.WithTimeout(context.Background(), 60*time.Second) // Dłuższy timeout dla P95
+		defer cancel()
+	}
+
 	result, warnings, err := promAPI.Query(ctx, query, time.Now())
 	if err != nil {
 		log.Printf("Błąd zapytania do Prometheus (%s): %v", query, err)
@@ -232,14 +278,86 @@ func queryPrometheusScalar(query string) int64 {
 	}
 	vector, ok := result.(model.Vector)
 	if !ok || vector.Len() == 0 {
+		// Log.Printf("Zapytanie nie zwróciło wektora lub wektor jest pusty: %s", query) // Opcjonalny debug
 		return 0
 	}
 	value := vector[0].Value
+	if math.IsNaN(float64(value)) {
+		return 0
+	}
 	return int64(math.Round(float64(value)))
 }
 
-// updateDeploymentResourcesHandler (pełna implementacja)
+// metricsHandler (bez zmian)
+func metricsHandler(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/deployments/"), "/")
+	if len(parts) != 3 || parts[2] != "metrics" {
+		http.Error(w, "Nieprawidłowy format URL", http.StatusBadRequest)
+		return
+	}
+	namespace := parts[0]
+	name := parts[1]
+
+	endTime := time.Now()
+	startTime := endTime.Add(-1 * time.Hour)
+	step := time.Minute
+	promRange := prometheusv1.Range{
+		Start: startTime,
+		End:   endTime,
+		Step:  step,
+	}
+
+	// Używamy zapytań AVG dla wykresów
+	selectorString := buildPrometheusSelector(namespace, name)
+	cpuQuery := fmt.Sprintf(avgCpuQueryTemplate, selectorString)
+	memQuery := fmt.Sprintf(avgMemQueryTemplate, selectorString)
+
+	history := MetricHistory{
+		CpuUsage:    queryPrometheusRange(cpuQuery, promRange),
+		MemoryUsage: queryPrometheusRange(memQuery, promRange),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(history); err != nil {
+		http.Error(w, fmt.Sprintf("Błąd kodowania JSON: %v", err), http.StatusInternalServerError)
+	}
+}
+
+// queryPrometheusRange (bez zmian)
+func queryPrometheusRange(query string, promRange prometheusv1.Range) []MetricPoint {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, warnings, err := promAPI.QueryRange(ctx, query, promRange)
+	if err != nil {
+		log.Printf("Błąd zapytania (range) do Prometheus (%s): %v", query, err)
+		return nil
+	}
+	if len(warnings) > 0 {
+		log.Printf("Ostrzeżenia z Prometheus: %v", warnings)
+	}
+
+	matrix, ok := result.(model.Matrix)
+	if !ok || matrix.Len() == 0 {
+		return nil
+	}
+
+	points := []MetricPoint{}
+	if matrix.Len() > 0 {
+		stream := matrix[0]
+		for _, v := range stream.Values {
+			points = append(points, MetricPoint{
+				Timestamp: int64(v.Timestamp),
+				Value:     float64(v.Value),
+			})
+		}
+	}
+	return points
+}
+
+// updateDeploymentResourcesHandler (bez zmian)
 func updateDeploymentResourcesHandler(w http.ResponseWriter, r *http.Request) {
+	// ... (kod bez zmian) ...
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/deployments/"), "/")
 	if len(parts) != 3 || parts[2] != "resources" {
 		http.Error(w, "Nieprawidłowy format URL", http.StatusBadRequest)
@@ -268,7 +386,6 @@ func updateDeploymentResourcesHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Wdrożenie nie ma zdefiniowanych kontenerów", http.StatusInternalServerError)
 		return
 	}
-
 	container := &deployment.Spec.Template.Spec.Containers[0]
 	if container.Resources.Requests == nil {
 		container.Resources.Requests = make(corev1.ResourceList)
@@ -280,7 +397,9 @@ func updateDeploymentResourcesHandler(w http.ResponseWriter, r *http.Request) {
 	var parseErrors []string
 	applyChange := func(field **string, resourceName corev1.ResourceName, list corev1.ResourceList) {
 		if *field != nil {
-			if qty, err := resource.ParseQuantity(**field); err == nil {
+			if **field == "" {
+				delete(list, resourceName)
+			} else if qty, err := resource.ParseQuantity(**field); err == nil {
 				list[resourceName] = qty
 			} else {
 				parseErrors = append(parseErrors, fmt.Sprintf("Nieprawidłowa wartość %s: %v", resourceName, err))
@@ -307,15 +426,16 @@ func updateDeploymentResourcesHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Zasoby dla %s/%s zaktualizowane pomyślnie", namespace, name)
 }
 
-// formatBytesTrim (pełna implementacja)
+// formatBytesTrim (bez zmian)
 func formatBytesTrim(bytes int64, decimals ...int) string {
+	// ... (kod bez zmian) ...
 	if bytes == 0 {
 		return "0B"
 	}
 	k := int64(1024)
-	dm := float64(0)
-	if len(decimals) > 0 {
-		dm = float64(decimals[0])
+	dec := 1
+	if len(decimals) > 0 && decimals[0] >= 0 {
+		dec = decimals[0]
 	}
 	sizes := []string{"B", "KB", "MB", "GB", "TB"}
 	i := 0
@@ -324,8 +444,8 @@ func formatBytesTrim(bytes int64, decimals ...int) string {
 		b /= float64(k)
 		i++
 	}
-	format := fmt.Sprintf("%%.%df%%s", int(dm))
-	if dm == 0 {
+	format := fmt.Sprintf("%%.%df%%s", dec)
+	if b == float64(int64(b)) {
 		format = "%.0f%s"
 	}
 	return fmt.Sprintf(format, b, sizes[i])

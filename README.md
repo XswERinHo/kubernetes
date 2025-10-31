@@ -13,7 +13,7 @@ Celem jest stworzenie inteligentnego asystenta, który aktywnie pomaga w optymal
 * Wsparcie dla `Deployments`, `StatefulSets`, `DaemonSets`, `CronJobs`.
 
 ### 2. Inteligencja i Proaktywność (Rekomendacje) 🧠
-* Rekomendacje `requests`/`limits` oparte na **danych historycznych** (integracja z Prometheus).
+* Rekomendacje `requests`/`limits` oparte na **danych historycznych** (integracja z Prometheus, np. 95. percentyl).
 * Identyfikacja marnotrawstwa (zasoby "zombie", przewymiarowanie, niedowymiarowanie).
 * Sugestie dotyczące konfiguracji autoskalowania (HPA/VPA).
 * Wykrywanie anomalii w zużyciu zasobów.
@@ -31,11 +31,14 @@ Celem jest stworzenie inteligentnego asystenta, który aktywnie pomaga w optymal
 * (Zaawansowane) Integracja z CI/CD.
 
 ### 5. Doskonałe Doświadczenie Użytkownika (UX/UI) ✨
-* Przejrzysty, nowoczesny interfejs.
+* Przejrzysty, nowoczesny interfejs (np. układ dashboardu zamiast tabeli).
 * Zaawansowane filtrowanie i wyszukiwanie.
-* Czytelne wykresy danych historycznych.
+* Czytelne wykresy danych historycznych (wzbogacone o kontekst requests/limits).
 * Konfigurowalne alerty i powiadomienia.
-* Uwierzytelnianie i Role-Based Access Control (RBAC).
+* Uwierzytelnianie i Role-Based Access Control (RBAC) z podziałem na role:
+    * **Admin:** Pełna kontrola nad aplikacją, może edytować zasoby i zatwierdzać zmiany innych.
+    * **Editor (Moderator):** Może aplikować automatyczne rekomendacje. Ręczne edycje wymagają zatwierdzenia przez Admina.
+    * **Viewer:** Dostęp tylko do odczytu (np. dla programistów), pozwalający na podgląd zużycia i wykresów bez możliwości wprowadzania zmian.
 
 ### 6. Skalowalność i Wydajność 🚀
 * Wsparcie dla zarządzania **wieloma klastrami** z jednego interfejsu.
