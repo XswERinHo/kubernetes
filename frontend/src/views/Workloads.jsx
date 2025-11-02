@@ -1,6 +1,3 @@
-// Pełna zawartość pliku:
-// frontend/src/views/Workloads.jsx
-
 import { useState, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import {
@@ -15,22 +12,22 @@ import InfoIcon from '@mui/icons-material/Info';
 import ApplyChangesIcon from '@mui/icons-material/Send';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SearchIcon from '@mui/icons-material/Search';
-import { useTranslation } from 'react-i18next'; // <-- IMPORT i18n
+import { useTranslation } from 'react-i18next';
 
 import ChartModal from '../components/ChartModal';
 import WorkloadCard from '../components/WorkloadCard';
-import { formatCurrency } from '../utils/formatters';
+import { useCurrencyFormatter } from '../hooks/useCurrencyFormatter'; // <-- NOWY IMPORT
 import { parseActionableRecommendation } from '../utils/recommendations';
 
 const modalStyle = { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 600, bgcolor: 'background.paper', border: '2px solid #000', boxShadow: 24, p: 4, color: 'white', backgroundColor: '#424242' };
 
 export default function Workloads() {
   const { workloads, fetchData } = useOutletContext();
-  const { t } = useTranslation(); // <-- Używamy hooka
+  const { t } = useTranslation();
+  const formatCurrency = useCurrencyFormatter(); // <-- UŻYWAMY HOOKA
   
   // Stany dla Modali
   const [selectedWorkload, setSelectedWorkload] = useState(null);
-  // ... (reszta stanów bez zmian) ...
   const [editWorkload, setEditWorkload] = useState(null);
   const [chartWorkload, setChartWorkload] = useState(null);
   const [formData, setFormData] = useState({ cpuRequests: '', cpuLimits: '', memoryRequests: '', memoryLimits: '' });
@@ -61,7 +58,6 @@ export default function Workloads() {
   const handleCloseChartModal = () => setChartWorkload(null);
   const handleFormChange = (event) => { const { name, value } = event.target; setFormData(prev => ({ ...prev, [name]: value })); };
   const handleFormSubmit = () => {
-    // Tłumaczenie tekstów dynamicznych (chociaż tutaj i tak są nadpisywane)
     const change = { resource: 'manualUpdate', value: formData, text: `Czy na pewno chcesz ręcznie zaktualizować zasoby dla ${editWorkload.namespace}/${editWorkload.name}?` };
     setActionToConfirm({ workload: editWorkload, change: change });
     setConfirmDialogOpen(true);
@@ -91,7 +87,6 @@ export default function Workloads() {
 
   // Funkcja API (bez zmian)
   const applyResourceUpdate = (workload, body) => {
-    // ... (cała funkcja bez zmian) ...
     const { namespace, name, kind } = workload;
     fetch(`/api/workloads/${namespace}/${kind}/${name}/resources`, {
       method: 'PATCH',
@@ -242,11 +237,9 @@ export default function Workloads() {
         ))}
       </Container>
 
-      {/* --- MODALE (zostają po angielsku, bo to komunikaty systemowe) --- */}
-      {/* (Można je przetłumaczyć, ale to mniej pilne) */}
+      {/* --- MODALE --- */}
       
       <Modal open={Boolean(selectedWorkload)} onClose={handleCloseDetails}>
-        {/* ... (treść modala bez zmian) ... */}
         <Box sx={modalStyle}>
           <Typography variant="h6" component="h2"> Recommendations for {selectedWorkload?.namespace}/{selectedWorkload?.name} </Typography>
           <ul style={{ marginTop: '16px', paddingLeft: '20px', listStyle: 'none' }}>
@@ -265,7 +258,6 @@ export default function Workloads() {
       </Modal>
 
       <Dialog open={Boolean(editWorkload)} onClose={handleCloseEditModal}>
-        {/* ... (treść modala bez zmian) ... */}
         <DialogTitle>Edit Resources: {editWorkload?.namespace}/{editWorkload?.name}</DialogTitle>
         <DialogContent>
           <DialogContentText sx={{mb: 2}}>
@@ -285,7 +277,6 @@ export default function Workloads() {
       </Dialog>
       
       <Dialog open={confirmDialogOpen} onClose={() => handleConfirmDialogClose(false)}>
-        {/* ... (treść modala bez zmian) ... */}
         <DialogTitle>Confirm Action</DialogTitle>
         <DialogContent>
           <DialogContentText>

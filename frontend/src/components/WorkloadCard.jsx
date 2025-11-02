@@ -6,11 +6,12 @@ import { Gauge } from '@mui/x-charts/Gauge';
 import InfoIcon from '@mui/icons-material/Info';
 import EditIcon from '@mui/icons-material/Edit';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
-import { useTranslation } from 'react-i18next'; // <-- IMPORT i18n
+import { useTranslation } from 'react-i18next';
 
-import { formatCurrency, formatBytes, parseCpu, parseMemory } from '../utils/formatters';
+import { formatBytes, parseCpu, parseMemory } from '../utils/formatters'; // <-- ZMIENIONY IMPORT
+import { useCurrencyFormatter } from '../hooks/useCurrencyFormatter'; // <-- NOWY IMPORT
 
-// ... (funkcje pomocnicze getUsagePercent i getGaugeColor bez zmian) ...
+// Funkcje pomocnicze (bez zmian)
 const getUsagePercent = (usage, request) => {
   if (!request || request === 0) return 0;
   if (!usage || usage === 0) return 0;
@@ -25,9 +26,10 @@ const getGaugeColor = (value) => {
 
 
 export default function WorkloadCard({ workload, onOpenChart, onOpenEdit, onOpenDetails }) {
-  const { t } = useTranslation(); // <-- Używamy hooka
+  const { t } = useTranslation();
+  const formatCurrency = useCurrencyFormatter(); // <-- UŻYWAMY HOOKA
   
-  // ... (logika parsowania bez zmian) ...
+  // Logika parsowania (bez zmian)
   const cpuReqParsed = parseCpu(workload.cpuRequests);
   const memReqParsed = parseMemory(workload.memoryRequests);
   const cpuPercent = getUsagePercent(workload.avgCpuUsage, cpuReqParsed);
@@ -66,7 +68,6 @@ export default function WorkloadCard({ workload, onOpenChart, onOpenEdit, onOpen
         <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', my: 2 }}>
           <Box sx={{ textAlign: 'center' }}>
             <Gauge
-              // ... (propsy Gauge bez zmian) ...
               width={100} height={100} value={cpuPercent} valueMin={0} valueMax={100}
               startAngle={-90} endAngle={90} text={`${cpuPercent}%`}
               sx={(theme) => ({
@@ -80,7 +81,6 @@ export default function WorkloadCard({ workload, onOpenChart, onOpenEdit, onOpen
           </Box>
           <Box sx={{ textAlign: 'center' }}>
             <Gauge
-              // ... (propsy Gauge bez zmian) ...
               width={100} height={100} value={memPercent} valueMin={0} valueMax={100}
               startAngle={-90} endAngle={90} text={`${memPercent}%`}
               sx={(theme) => ({

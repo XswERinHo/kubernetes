@@ -2,8 +2,8 @@ import { useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Typography, Paper, Grid, Box } from '@mui/material';
 import { PieChart } from '@mui/x-charts/PieChart';
-import { formatCurrency } from '../utils/formatters';
-import { useTranslation } from 'react-i18next'; // <-- IMPORT i18n
+import { useCurrencyFormatter } from '../hooks/useCurrencyFormatter'; // <-- NOWY IMPORT
+import { useTranslation } from 'react-i18next';
 
 // Komponent pomocniczy dla karty KPI
 function KpiCard({ title, value, color = 'text.primary' }) {
@@ -29,22 +29,25 @@ function extractSavings(recommendationText) {
 
 export default function Dashboard() {
   const { workloads } = useOutletContext();
-  const { t } = useTranslation(); // <-- Używamy hooka
+  const { t } = useTranslation();
+  const formatCurrency = useCurrencyFormatter(); // <-- UŻYWAMY HOOKA
 
   const dashboardStats = useMemo(() => {
-    // ... (cała logika useMemo bez zmian) ...
     let totalUsageCost = 0;
     let totalRequestCost = 0;
     let totalSavings = 0;
     let criticalRecs = 0;
     const namespaceCosts = {};
+
     for (const w of workloads) {
       totalUsageCost += w.usageCost;
       totalRequestCost += w.requestCost;
+
       if (!namespaceCosts[w.namespace]) {
         namespaceCosts[w.namespace] = 0;
       }
       namespaceCosts[w.namespace] += w.usageCost;
+
       for (const rec of w.recommendations) {
         if (rec.startsWith('Krytyczne:')) {
           criticalRecs++;
@@ -52,6 +55,7 @@ export default function Dashboard() {
         totalSavings += extractSavings(rec);
       }
     }
+
     const pieChartData = Object.entries(namespaceCosts)
       .filter(([, cost]) => cost > 0)
       .map(([ns, cost], id) => ({
@@ -60,6 +64,7 @@ export default function Dashboard() {
         label: ns,
       }))
       .sort((a, b) => b.value - a.value);
+
     return {
       totalUsageCost,
       totalRequestCost,

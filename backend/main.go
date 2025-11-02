@@ -10,13 +10,23 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	// --- NOWE IMPORTY DLA OPERATORA ---
+
+	// POPRAWIONA ŚCIEŻKA:
+	monitoringClient "github.com/prometheus-operator/prometheus-operator/pkg/client/versioned"
+	// --- KONIEC NOWYCH IMPORTÓW ---
+
 	// Importy K8s
-	// <--- DODANY IMPORT
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -26,7 +36,33 @@ import (
 	"github.com/prometheus/common/model"
 )
 
-// WorkloadInfo - ujednolicona struktura dla wszystkich typów zasobów
+// --- Sekcje Cache (bez zmian) ---
+type CacheItem struct {
+	Data   int64
+	Expiry time.Time
+}
+
+var (
+	promCache  = make(map[string]CacheItem)
+	cacheMutex = &sync.RWMutex{}
+)
+
+type RangeCacheItem struct {
+	Data   []MetricPoint
+	Expiry time.Time
+}
+
+var (
+	promRangeCache  = make(map[string]RangeCacheItem)
+	rangeCacheMutex = &sync.RWMutex{}
+)
+
+const (
+	shortCacheTTL = 1 * time.Minute
+	longCacheTTL  = 1 * time.Hour
+)
+
+// Struktury (bez zmian)
 type WorkloadInfo struct {
 	Name            string   `json:"name"`
 	Namespace       string   `json:"namespace"`
@@ -38,20 +74,15 @@ type WorkloadInfo struct {
 	AvgCpuUsage     int64    `json:"avgCpuUsage"`
 	AvgMemoryUsage  int64    `json:"avgMemoryUsage"`
 	Recommendations []string `json:"recommendations"`
-	// --- NOWE POLA FINOPS ---
-	RequestCost float64 `json:"requestCost"`
-	UsageCost   float64 `json:"usageCost"`
+	RequestCost     float64  `json:"requestCost"`
+	UsageCost       float64  `json:"usageCost"`
 }
-
-// ResourceUpdateRequest - struktura do aktualizacji zasobów
 type ResourceUpdateRequest struct {
 	CpuRequests    *string `json:"cpuRequests,omitempty"`
 	CpuLimits      *string `json:"cpuLimits,omitempty"`
 	MemoryRequests *string `json:"memoryRequests,omitempty"`
 	MemoryLimits   *string `json:"memoryLimits,omitempty"`
 }
-
-// Struktura dla wykresów
 type MetricPoint struct {
 	Timestamp int64   `json:"timestamp"`
 	Value     float64 `json:"value"`
@@ -61,37 +92,43 @@ type MetricHistory struct {
 	MemoryUsage []MetricPoint `json:"memoryUsage"`
 }
 
-// Globalne zmienne i progi
+// Zmienne globalne (z nowymi klientami)
 var clientset *kubernetes.Clientset
 var promAPI prometheusv1.API
+var monitoringClientset *monitoringClient.Clientset
+var dynamicClient dynamic.Interface
+
 var minCpuRequestMilli int64 = 50
-var minMemRequestBytes int64 = 64 * 1024 * 1024 // 64Mi
+var minMemRequestBytes int64 = 64 * 1024 * 1024
+var costPerCpuCorePerMonth float64 = 80.0
+var costPerGbRamPerMonth float64 = 40.0
 
-// --- NOWE ZMIENNE FINOPS (CENNIK BAZOWY W PLN) ---
-var costPerCpuCorePerMonth float64 = 80.0 // Przykładowo 80 PLN / vCPU / miesiąc
-var costPerGbRamPerMonth float64 = 40.0   // Przykładowo 40 PLN / GB RAM / miesiąc
-// --- KONIEC ZMIENNYCH FINOPS ---
-
-// Szablony zapytań PromQL (AVG bez zmian)
+// Szablony PromQL (bez zmian)
 const avgCpuQueryTemplate = `sum(rate(container_cpu_usage_seconds_total%s[5m])) * 1000`
 const avgMemQueryTemplate = `sum(container_memory_working_set_bytes%s)`
-
-// --- POPRAWIONE ZAPYTANIA P95 (NAPRAWIA BŁĄD 'subquery') ---
 const p95CpuQueryTemplate = `sum(quantile_over_time(0.95, rate(container_cpu_usage_seconds_total%s[5m])[7d:5m])) * 1000`
 const p95MemQueryTemplate = `sum(quantile_over_time(0.95, container_memory_working_set_bytes%s[7d:5m]))`
 
-// --- KONIEC POPRAWKI ---
-
 func main() {
-	// Inicjalizacja K8s
 	kubeconfigPath := filepath.Join(os.Getenv("USERPROFILE"), ".kube", "config")
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
 		log.Fatalf("Błąd budowania konfiguracji kubeconfig: %s", err.Error())
 	}
+
 	clientset, err = kubernetes.NewForConfig(config)
 	if err != nil {
 		log.Fatalf("Błąd tworzenia clientset: %s", err.Error())
+	}
+
+	// Inicjalizacja nowych klientów
+	monitoringClientset, err = monitoringClient.NewForConfig(config)
+	if err != nil {
+		log.Fatalf("Błąd tworzenia monitoring clientset: %s", err.Error())
+	}
+	dynamicClient, err = dynamic.NewForConfig(config)
+	if err != nil {
+		log.Fatalf("Błąd tworzenia dynamic clientset: %s", err.Error())
 	}
 
 	// Inicjalizacja Prometheusa
@@ -105,8 +142,6 @@ func main() {
 
 	// Rejestracja endpointów
 	http.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintf(w, "API is healthy!") })
-
-	// Główny endpoint do pobierania wszystkich zasobów
 	http.HandleFunc("/api/workloads", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			workloadsHandler(w, r)
@@ -114,15 +149,12 @@ func main() {
 			http.Error(w, "Metoda niedozwolona", http.StatusMethodNotAllowed)
 		}
 	})
-
-	// Endpointy szczegółowe dla konkretnego zasobu
 	http.HandleFunc("/api/workloads/", func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		if len(parts) < 6 {
 			http.NotFound(w, r)
 			return
 		}
-
 		namespace := parts[2]
 		kind := parts[3]
 		name := parts[4]
@@ -139,7 +171,6 @@ func main() {
 		http.NotFound(w, r)
 	})
 
-	// Uruchomienie serwera
 	fmt.Println("Starting server on port 8080...")
 	fmt.Println("Backend połączony z Kubernetesem i Prometheusem (przez http://localhost:30090).")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
@@ -147,35 +178,7 @@ func main() {
 	}
 }
 
-// Prosta funkcja budująca selektor (bez zmian)
-func buildPrometheusSelector(namespace, workloadName string) string {
-	return fmt.Sprintf(`{namespace="%s", pod=~"%s-.*"}`, namespace, workloadName)
-}
-
-// Funkcja pomocnicza do odczytu zasobów (bez zmian)
-func getResourceTotals(spec corev1.PodSpec) (cpuReqTotal, cpuLimTotal, memReqTotal, memLimTotal resource.Quantity, hasCpuReq, hasMemReq, hasCpuLim, hasMemLim bool) {
-	for _, container := range spec.Containers {
-		if reqCpu, ok := container.Resources.Requests[corev1.ResourceCPU]; ok && reqCpu.Value() > 0 {
-			cpuReqTotal.Add(reqCpu)
-			hasCpuReq = true
-		}
-		if reqMem, ok := container.Resources.Requests[corev1.ResourceMemory]; ok && reqMem.Value() > 0 {
-			memReqTotal.Add(reqMem)
-			hasMemReq = true
-		}
-		if limCpu, ok := container.Resources.Limits[corev1.ResourceCPU]; ok && limCpu.Value() > 0 {
-			cpuLimTotal.Add(limCpu)
-			hasCpuLim = true
-		}
-		if limMem, ok := container.Resources.Limits[corev1.ResourceMemory]; ok && limMem.Value() > 0 {
-			memLimTotal.Add(limMem)
-			hasMemLim = true
-		}
-	}
-	return
-}
-
-// Główny handler pobierający wszystkie workloadi (ZMODYFIKOWANY)
+// Główny handler pobierający wszystkie workloadi
 func workloadsHandler(w http.ResponseWriter, _ *http.Request) {
 	var workloadInfos []WorkloadInfo
 	ctx := context.Background()
@@ -237,8 +240,7 @@ func workloadsHandler(w http.ResponseWriter, _ *http.Request) {
 			wlInfo := processWorkload(
 				item.Name,
 				item.Namespace,
-				"CronJob", // Nowy Kind
-				// CronJob ma szablon poda w innej ścieżce
+				"CronJob",
 				item.Spec.JobTemplate.Spec.Template.Spec,
 			)
 			workloadInfos = append(workloadInfos, wlInfo)
@@ -251,47 +253,283 @@ func workloadsHandler(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// ZMODYFIKOWANA funkcja przetwarzająca pojedynczy workload (dodane koszty)
+// Prosta funkcja budująca selektor
+func buildPrometheusSelector(namespace, workloadName string) string {
+	return fmt.Sprintf(`{namespace="%s", pod=~"%s-.*"}`, namespace, workloadName)
+}
+
+// Funkcja pomocnicza do odczytu zasobów
+func getResourceTotals(spec corev1.PodSpec) (cpuReqTotal, cpuLimTotal, memReqTotal, memLimTotal resource.Quantity, hasCpuReq, hasMemReq, hasCpuLim, hasMemLim bool) {
+	for _, container := range spec.Containers {
+		if reqCpu, ok := container.Resources.Requests[corev1.ResourceCPU]; ok && reqCpu.Value() > 0 {
+			cpuReqTotal.Add(reqCpu)
+			hasCpuReq = true
+		}
+		if reqMem, ok := container.Resources.Requests[corev1.ResourceMemory]; ok && reqMem.Value() > 0 {
+			memReqTotal.Add(reqMem)
+			hasMemReq = true
+		}
+		if limCpu, ok := container.Resources.Limits[corev1.ResourceCPU]; ok && limCpu.Value() > 0 {
+			cpuLimTotal.Add(limCpu)
+			hasCpuLim = true
+		}
+		if limMem, ok := container.Resources.Limits[corev1.ResourceMemory]; ok && limMem.Value() > 0 {
+			memLimTotal.Add(limMem)
+			hasMemLim = true
+		}
+	}
+	return
+}
+
+// Sprawdza, czy zasób jest zarządzany przez znanego Operatora
+func getOwnerCRD(ctx context.Context, namespace, kind, name string) (ownerKind string, ownerName string, isOperatorManaged bool) {
+	var gvr schema.GroupVersionResource
+	switch kind {
+	case "Deployment":
+		gvr = appsv1.SchemeGroupVersion.WithResource("deployments")
+	case "StatefulSet":
+		gvr = appsv1.SchemeGroupVersion.WithResource("statefulsets")
+	case "DaemonSet":
+		gvr = appsv1.SchemeGroupVersion.WithResource("daemonsets")
+	default:
+		return "", "", false
+	}
+
+	unstructuredObj, err := dynamicClient.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		log.Printf("Błąd dynamicznego pobierania zasobu %s/%s: %v", namespace, name, err)
+		return "", "", false
+	}
+
+	owners := unstructuredObj.GetOwnerReferences()
+	if len(owners) == 0 {
+		return "", "", false
+	}
+
+	for _, owner := range owners {
+		if strings.EqualFold(owner.APIVersion, "monitoring.coreos.com/v1") {
+			if strings.EqualFold(owner.Kind, "Prometheus") || strings.EqualFold(owner.Kind, "Alertmanager") {
+				log.Printf("Zasób %s/%s jest zarządzany przez Operatora! Właściciel: %s", namespace, name, owner.Name)
+				return owner.Kind, owner.Name, true
+			}
+		}
+	}
+
+	return "", "", false
+}
+
+// Handler aktualizacji
+func updateWorkloadResourcesHandler(w http.ResponseWriter, r *http.Request, namespace, kind, name string) {
+	ctx := context.Background()
+	var reqUpdate ResourceUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqUpdate); err != nil {
+		http.Error(w, fmt.Sprintf("Błąd odczytu JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	ownerKind, ownerName, isOperatorManaged := getOwnerCRD(ctx, namespace, kind, name)
+
+	var err error
+	if isOperatorManaged {
+		log.Printf("Wykryto zasób zarządzany przez Operatora. Przekierowuję żądanie do %s/%s...", ownerKind, ownerName)
+		err = updateOperatorResource(ctx, namespace, ownerKind, ownerName, &reqUpdate)
+	} else {
+		log.Printf("Wykryto zwykły zasób. Aktualizuję bezpośrednio...")
+		err = updateStandardResource(ctx, namespace, kind, name, &reqUpdate)
+	}
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Błąd aktualizacji zasobu: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Zaktualizowano zasób: %s/%s. Czyszczenie cache'a...", namespace, name)
+	clearAllCaches(namespace, kind, name)
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "Zasoby dla %s/%s (%s) zaktualizowane pomyśmie", namespace, name, kind)
+}
+
+// Aktualizacja zasobów zarządzanych przez Operatora
+func updateOperatorResource(ctx context.Context, namespace, ownerKind, ownerName string, reqUpdate *ResourceUpdateRequest) error {
+
+	newResources, err := parseResourceRequirements(reqUpdate)
+	if err != nil {
+		return err
+	}
+
+	switch ownerKind {
+	case "Prometheus":
+		prometheusCR, err := monitoringClientset.MonitoringV1().Prometheuses(namespace).Get(ctx, ownerName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("nie znaleziono zasobu CR 'Prometheus' %s: %v", ownerName, err)
+		}
+		prometheusCR.Spec.Resources = newResources
+
+		_, err = monitoringClientset.MonitoringV1().Prometheuses(namespace).Update(ctx, prometheusCR, metav1.UpdateOptions{})
+		return err
+
+	case "Alertmanager":
+		alertmanagerCR, err := monitoringClientset.MonitoringV1().Alertmanagers(namespace).Get(ctx, ownerName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("nie znaleziono zasobu CR 'Alertmanager' %s: %v", ownerName, err)
+		}
+		alertmanagerCR.Spec.Resources = newResources
+
+		_, err = monitoringClientset.MonitoringV1().Alertmanagers(namespace).Update(ctx, alertmanagerCR, metav1.UpdateOptions{})
+		return err
+	}
+
+	return fmt.Errorf("nieobsługiwany rodzaj zasobu operatora: %s", ownerKind)
+}
+
+// Stara logika aktualizacji (dla zwykłych zasobów)
+func updateStandardResource(ctx context.Context, namespace, kind, name string, reqUpdate *ResourceUpdateRequest) error {
+
+	var podSpec *corev1.PodSpec
+	var updateFunc func(context.Context, metav1.UpdateOptions) (runtime.Object, error)
+
+	switch kind {
+	case "Deployment":
+		obj, err := clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		podSpec = &obj.Spec.Template.Spec
+		updateFunc = func(ctx context.Context, opts metav1.UpdateOptions) (runtime.Object, error) {
+			return clientset.AppsV1().Deployments(namespace).Update(ctx, obj, opts)
+		}
+	case "StatefulSet":
+		obj, err := clientset.AppsV1().StatefulSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		podSpec = &obj.Spec.Template.Spec
+		updateFunc = func(ctx context.Context, opts metav1.UpdateOptions) (runtime.Object, error) {
+			return clientset.AppsV1().StatefulSets(namespace).Update(ctx, obj, opts)
+		}
+	case "DaemonSet":
+		obj, err := clientset.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		podSpec = &obj.Spec.Template.Spec
+		updateFunc = func(ctx context.Context, opts metav1.UpdateOptions) (runtime.Object, error) {
+			return clientset.AppsV1().DaemonSets(namespace).Update(ctx, obj, opts)
+		}
+	case "CronJob":
+		obj, err := clientset.BatchV1().CronJobs(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		podSpec = &obj.Spec.JobTemplate.Spec.Template.Spec
+		updateFunc = func(ctx context.Context, opts metav1.UpdateOptions) (runtime.Object, error) {
+			return clientset.BatchV1().CronJobs(namespace).Update(ctx, obj, opts)
+		}
+	default:
+		return fmt.Errorf("nieobsługiwany typ zasobu: %s", kind)
+	}
+
+	if len(podSpec.Containers) == 0 {
+		return fmt.Errorf("zasób nie ma zdefiniowanych kontenerów")
+	}
+
+	newResources, err := parseResourceRequirements(reqUpdate)
+	if err != nil {
+		return err
+	}
+	for i := range podSpec.Containers {
+		podSpec.Containers[i].Resources = newResources
+	}
+
+	_, err = updateFunc(ctx, metav1.UpdateOptions{})
+	return err
+}
+
+// Funkcja pomocnicza: Parsuje request na zasoby K8s
+func parseResourceRequirements(reqUpdate *ResourceUpdateRequest) (corev1.ResourceRequirements, error) {
+	requests := corev1.ResourceList{}
+	limits := corev1.ResourceList{}
+	var parseErrors []string
+
+	parseField := func(field *string, resName corev1.ResourceName, list corev1.ResourceList) {
+		if field != nil {
+			if *field == "" {
+				// Użytkownik chce usunąć
+			} else if qty, err := resource.ParseQuantity(*field); err == nil {
+				list[resName] = qty
+			} else {
+				parseErrors = append(parseErrors, fmt.Sprintf("Nieprawidłowa wartość %s: %v", resName, err))
+			}
+		}
+	}
+
+	parseField(reqUpdate.CpuRequests, corev1.ResourceCPU, requests)
+	parseField(reqUpdate.CpuLimits, corev1.ResourceCPU, limits)
+	parseField(reqUpdate.MemoryRequests, corev1.ResourceMemory, requests)
+	parseField(reqUpdate.MemoryLimits, corev1.ResourceMemory, limits)
+
+	if len(parseErrors) > 0 {
+		// --- POPRAWKA LINTERA ---
+		// Zamiast fmt.Errorf(strings.Join(...))
+		return corev1.ResourceRequirements{}, fmt.Errorf("%s", strings.Join(parseErrors, "; "))
+		// --- KONIEC POPRAWKI ---
+	}
+
+	return corev1.ResourceRequirements{Requests: requests, Limits: limits}, nil
+}
+
+// Funkcja pomocnicza: Czyści wszystkie cache
+func clearAllCaches(namespace, kind, name string) {
+	cacheMutex.Lock()
+	delete(promCache, fmt.Sprintf("%s-%s-%s-avg-cpu", namespace, kind, name))
+	delete(promCache, fmt.Sprintf("%s-%s-%s-avg-mem", namespace, kind, name))
+	delete(promCache, fmt.Sprintf("%s-%s-%s-p95-cpu", namespace, kind, name))
+	delete(promCache, fmt.Sprintf("%s-%s-%s-p95-mem", namespace, kind, name))
+	cacheMutex.Unlock()
+
+	rangeCacheMutex.Lock()
+	for _, aRange := range []string{"1h", "6h", "24h", "7d"} {
+		delete(promRangeCache, fmt.Sprintf("%s-%s-%s-range-cpu-%s", namespace, kind, name, aRange))
+		delete(promRangeCache, fmt.Sprintf("%s-%s-%s-range-mem-%s", namespace, kind, name, aRange))
+	}
+	rangeCacheMutex.Unlock()
+}
+
+// Funkcja processWorkload (bez zmian)
 func processWorkload(name, namespace, kind string, podSpec corev1.PodSpec) WorkloadInfo {
-	// 1. Pobierz zasoby (Requests/Limits)
 	cpuReqTotal, cpuLimTotal, memReqTotal, memLimTotal,
 		hasCpuReq, hasMemReq, hasCpuLim, hasMemLim := getResourceTotals(podSpec)
 
-	// 2. Pobierz metryki z Prometheusa
-	selectorString := buildPrometheusSelector(namespace, name)
+	selectorString := buildPrometheusSelector(namespace, name) // Błąd był tutaj (funkcja brakowała)
+
+	avgCpuKey := fmt.Sprintf("%s-%s-%s-avg-cpu", namespace, kind, name)
+	avgMemKey := fmt.Sprintf("%s-%s-%s-avg-mem", namespace, kind, name)
+	p95CpuKey := fmt.Sprintf("%s-%s-%s-p95-cpu", namespace, kind, name)
+	p95MemKey := fmt.Sprintf("%s-%s-%s-p95-mem", namespace, kind, name)
 
 	avgCpuQuery := fmt.Sprintf(avgCpuQueryTemplate, selectorString)
-	avgCpuUsage := queryPrometheusScalar(avgCpuQuery)
 	avgMemQuery := fmt.Sprintf(avgMemQueryTemplate, selectorString)
-	avgMemUsage := queryPrometheusScalar(avgMemQuery)
-
 	p95CpuQuery := fmt.Sprintf(p95CpuQueryTemplate, selectorString)
-	p95CpuUsage := queryPrometheusScalar(p95CpuQuery)
 	p95MemQuery := fmt.Sprintf(p95MemQueryTemplate, selectorString)
-	p95MemUsage := queryPrometheusScalar(p95MemQuery)
 
-	// --- PRZENIESIONA LOGIKA OBLICZANIA KOSZTÓW (przed rekomendacjami) ---
+	avgCpuUsage := queryPrometheusScalarCached(avgCpuQuery, avgCpuKey, shortCacheTTL)
+	avgMemUsage := queryPrometheusScalarCached(avgMemQuery, avgMemKey, shortCacheTTL)
+	p95CpuUsage := queryPrometheusScalarCached(p95CpuQuery, p95CpuKey, longCacheTTL)
+	p95MemUsage := queryPrometheusScalarCached(p95MemQuery, p95MemKey, longCacheTTL)
+
 	cpuReqMilli := cpuReqTotal.MilliValue()
 	memReqBytes := memReqTotal.Value()
 	cpuLimMilli := cpuLimTotal.MilliValue()
 	memLimBytes := memLimTotal.Value()
-
-	// Konwersja na jednostki bazowe (Core i GB)
 	cpuReqCores := float64(cpuReqMilli) / 1000.0
 	memReqGB := float64(memReqBytes) / (1024 * 1024 * 1024)
-
 	avgCpuCores := float64(avgCpuUsage) / 1000.0
 	avgMemGB := float64(avgMemUsage) / (1024 * 1024 * 1024)
-
-	// Obliczenie kosztów
 	reqCost := (cpuReqCores * costPerCpuCorePerMonth) + (memReqGB * costPerGbRamPerMonth)
 	usageCost := (avgCpuCores * costPerCpuCorePerMonth) + (avgMemGB * costPerGbRamPerMonth)
-	// --- KONIEC LOGIKI KOSZTÓW ---
 
-	// 3. Generuj rekomendacje
 	var recommendations []string
-
-	// ... (logika rekomendacji bez zmian) ...
 	if !hasCpuReq || !hasMemReq {
 		recommendations = append(recommendations, "Krytyczne: Brak zdefiniowanych żądań (requests) CPU lub Pamięci!")
 	}
@@ -306,38 +544,28 @@ func processWorkload(name, namespace, kind string, podSpec corev1.PodSpec) Workl
 		}
 	}
 
-	// *** ZMIANA: REKOMENDACJA CPU Z FINOPS ***
 	if hasCpuReq && p95CpuUsage > 0 && cpuReqMilli > 0 {
 		usageRatio := float64(p95CpuUsage) / float64(cpuReqMilli)
 		if usageRatio < 0.3 && cpuReqMilli > minCpuRequestMilli {
-			// Oblicz sugerowane CPU
 			suggestedCpuMilli := int64(math.Max(float64(minCpuRequestMilli), math.Ceil(float64(p95CpuUsage)*1.5/10.0)*10.0))
 			suggestedCpuString := fmt.Sprintf("%dm", suggestedCpuMilli)
-
-			// Oblicz oszczędności
 			newCpuReqCores := float64(suggestedCpuMilli) / 1000.0
 			newReqCost := (newCpuReqCores * costPerCpuCorePerMonth) + (memReqGB * costPerGbRamPerMonth)
 			monthlySavings := reqCost - newReqCost
-
 			recommendationText := fmt.Sprintf("Info (7d p95): Niskie zużycie CPU (%dm - %.0f%% żądanych %s). Rozważ zmniejszenie żądań do %s (Oszczędność: %.2f zł/mc).", p95CpuUsage, usageRatio*100, cpuReqTotal.String(), suggestedCpuString, monthlySavings)
 			recommendations = append(recommendations, recommendationText)
 		}
 	}
 
-	// *** ZMIANA: REKOMENDACJA PAMIĘCI Z FINOPS ***
 	if hasMemReq && p95MemUsage > 0 && memReqBytes > 0 {
 		usageRatio := float64(p95MemUsage) / float64(memReqBytes)
 		if usageRatio < 0.3 && memReqBytes > minMemRequestBytes {
-			// Oblicz sugerowaną Pamięć
 			suggestedMemBytes := int64(math.Max(float64(minMemRequestBytes), float64(p95MemUsage)*1.5))
 			suggestedMemMiB := int64(math.Ceil(float64(suggestedMemBytes) / (1024 * 1024)))
 			suggestedMemString := fmt.Sprintf("%dMi", suggestedMemMiB)
-
-			// Oblicz oszczędności
 			newMemReqGB := float64(suggestedMemBytes) / (1024 * 1024 * 1024)
 			newReqCost := (cpuReqCores * costPerCpuCorePerMonth) + (newMemReqGB * costPerGbRamPerMonth)
 			monthlySavings := reqCost - newReqCost
-
 			recommendationText := fmt.Sprintf("Info (7d p95): Niskie zużycie Pamięci (%s - %.0f%% żądanej %s). Rozważ zmniejszenie żądań do %s (Oszczędność: %.2f zł/mc).", formatBytesTrim(p95MemUsage), usageRatio*100, memReqTotal.String(), suggestedMemString, monthlySavings)
 			recommendations = append(recommendations, recommendationText)
 		}
@@ -355,7 +583,6 @@ func processWorkload(name, namespace, kind string, podSpec corev1.PodSpec) Workl
 		}
 	}
 
-	// 4. Zwróć gotową strukturę
 	return WorkloadInfo{
 		Name:            name,
 		Namespace:       namespace,
@@ -367,13 +594,41 @@ func processWorkload(name, namespace, kind string, podSpec corev1.PodSpec) Workl
 		AvgCpuUsage:     avgCpuUsage,
 		AvgMemoryUsage:  avgMemUsage,
 		Recommendations: recommendations,
-		RequestCost:     reqCost,   // Dodane
-		UsageCost:       usageCost, // Dodane
+		RequestCost:     reqCost,
+		UsageCost:       usageCost,
 	}
 }
 
-// Funkcja do wykonywania zapytań skalarnych do Prometheusa (bez zmian)
-func queryPrometheusScalar(query string) int64 {
+// Funkcje Cache (bez zmian)
+func queryPrometheusScalarCached(query string, cacheKey string, ttl time.Duration) int64 {
+	cacheMutex.RLock()
+	item, found := promCache[cacheKey]
+	if found && time.Now().Before(item.Expiry) {
+		cacheMutex.RUnlock()
+		return item.Data
+	}
+	cacheMutex.RUnlock()
+
+	result, err := queryPrometheusScalar(query)
+	if err != nil {
+		log.Printf("BŁĄD ZAPYTANIA (nie zapisano w cache): %s", cacheKey)
+		if found {
+			return item.Data
+		}
+		return 0
+	}
+
+	cacheMutex.Lock()
+	promCache[cacheKey] = CacheItem{
+		Data:   result,
+		Expiry: time.Now().Add(ttl),
+	}
+	cacheMutex.Unlock()
+
+	return result
+}
+
+func queryPrometheusScalar(query string) (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -385,53 +640,54 @@ func queryPrometheusScalar(query string) int64 {
 	result, warnings, err := promAPI.Query(ctx, query, time.Now())
 	if err != nil {
 		log.Printf("Błąd zapytania do Prometheus (%s): %v", query, err)
-		return 0
+		return 0, err
 	}
 	if len(warnings) > 0 {
 		log.Printf("Ostrzeżenia z Prometheus: %v", warnings)
 	}
 	vector, ok := result.(model.Vector)
 	if !ok || vector.Len() == 0 {
-		return 0
+		return 0, nil
 	}
 	value := vector[0].Value
 	if math.IsNaN(float64(value)) {
-		return 0
+		return 0, nil
 	}
-	return int64(math.Round(float64(value)))
+	return int64(math.Round(float64(value))), nil
 }
 
-// Handler do pobierania metryk historycznych dla danego workloadu (ZMODYFIKOWANY)
+// Funkcje Wykresów (bez zmian)
 func metricsHandler(w http.ResponseWriter, r *http.Request, namespace, kind, name string) {
-	// 1. Pobierz parametr 'range' z URL
 	rangeParam := r.URL.Query().Get("range")
 	if rangeParam == "" {
-		rangeParam = "1h" // Domyślna wartość
+		rangeParam = "1h"
 	}
-
 	endTime := time.Now()
 	var startTime time.Time
 	var step time.Duration
+	var cacheTTL time.Duration
 
-	// 2. Ustaw startTime i step na podstawie parametru
 	switch rangeParam {
 	case "6h":
 		startTime = endTime.Add(-6 * time.Hour)
-		step = 5 * time.Minute // Krok co 5 minut
+		step = 5 * time.Minute
+		cacheTTL = 15 * time.Minute
 	case "24h":
 		startTime = endTime.Add(-24 * time.Hour)
-		step = 15 * time.Minute // Krok co 15 minut
+		step = 15 * time.Minute
+		cacheTTL = 30 * time.Minute
 	case "7d":
 		startTime = endTime.Add(-7 * 24 * time.Hour)
-		step = time.Hour // Krok co 1 godzinę
+		step = time.Hour
+		cacheTTL = longCacheTTL
 	case "1h":
-		fallthrough // Przejdź do domyślnego
+		fallthrough
 	default:
-		startTime = endTime.Add(-1 * time.Hour)
-		step = time.Minute // Krok co 1 minutę
+		startTime = endTime.Add(-1 * time.Minute)
+		step = time.Minute
+		cacheTTL = shortCacheTTL
 	}
 
-	// 3. Zbuduj zakres dla Prometheusa
 	promRange := prometheusv1.Range{
 		Start: startTime,
 		End:   endTime,
@@ -442,26 +698,62 @@ func metricsHandler(w http.ResponseWriter, r *http.Request, namespace, kind, nam
 	cpuQuery := fmt.Sprintf(avgCpuQueryTemplate, selectorString)
 	memQuery := fmt.Sprintf(avgMemQueryTemplate, selectorString)
 
-	history := MetricHistory{
-		CpuUsage:    queryPrometheusRange(cpuQuery, promRange),
-		MemoryUsage: queryPrometheusRange(memQuery, promRange),
-	}
+	cpuCacheKey := fmt.Sprintf("%s-%s-%s-range-cpu-%s", namespace, kind, name, rangeParam)
+	memCacheKey := fmt.Sprintf("%s-%s-%s-range-mem-%s", namespace, kind, name, rangeParam)
 
+	cpuHistory := queryPrometheusRangeCached(cpuQuery, promRange, cpuCacheKey, cacheTTL)
+	memHistory := queryPrometheusRangeCached(memQuery, promRange, memCacheKey, cacheTTL)
+
+	history := MetricHistory{
+		CpuUsage:    cpuHistory,
+		MemoryUsage: memHistory,
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(history); err != nil {
 		http.Error(w, fmt.Sprintf("Błąd kodowania JSON: %v", err), http.StatusInternalServerError)
 	}
 }
 
-// Funkcja do pobierania danych historycznych (range query) (bez zmian)
-func queryPrometheusRange(query string, promRange prometheusv1.Range) []MetricPoint {
+func queryPrometheusRangeCached(query string, promRange prometheusv1.Range, cacheKey string, ttl time.Duration) []MetricPoint {
+	rangeCacheMutex.RLock()
+	item, found := promRangeCache[cacheKey]
+	if found && time.Now().Before(item.Expiry) {
+		rangeCacheMutex.RUnlock()
+		return item.Data
+	}
+	rangeCacheMutex.RUnlock()
+
+	result, err := queryPrometheusRange(query, promRange)
+
+	if err != nil {
+		log.Printf("BŁĄD ZAPYTANIA (Range) (nie zapisano w cache): %s", cacheKey)
+		if found {
+			return item.Data
+		}
+		return nil
+	}
+
+	rangeCacheMutex.Lock()
+	promRangeCache[cacheKey] = RangeCacheItem{
+		Data:   result,
+		Expiry: time.Now().Add(ttl),
+	}
+	rangeCacheMutex.Unlock()
+
+	return result
+}
+
+func queryPrometheusRange(query string, promRange prometheusv1.Range) ([]MetricPoint, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if promRange.End.Sub(promRange.Start) > (24 * time.Hour) {
+		ctx, cancel = context.WithTimeout(context.Background(), 90*time.Second)
+	}
 	defer cancel()
 
 	result, warnings, err := promAPI.QueryRange(ctx, query, promRange)
 	if err != nil {
 		log.Printf("Błąd zapytania (range) do Prometheus (%s): %v", query, err)
-		return nil
+		return nil, err
 	}
 	if len(warnings) > 0 {
 		log.Printf("Ostrzeżenia z Prometheus: %v", warnings)
@@ -469,7 +761,7 @@ func queryPrometheusRange(query string, promRange prometheusv1.Range) []MetricPo
 
 	matrix, ok := result.(model.Matrix)
 	if !ok || matrix.Len() == 0 {
-		return nil
+		return nil, nil
 	}
 
 	points := []MetricPoint{}
@@ -482,111 +774,7 @@ func queryPrometheusRange(query string, promRange prometheusv1.Range) []MetricPo
 			})
 		}
 	}
-	return points
-}
-
-// Handler do aktualizacji zasobów dla danego workloadu (ZMODYFIKOWANY)
-func updateWorkloadResourcesHandler(w http.ResponseWriter, r *http.Request, namespace, kind, name string) {
-	var reqUpdate ResourceUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&reqUpdate); err != nil {
-		http.Error(w, fmt.Sprintf("Błąd odczytu JSON: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	var podSpec *corev1.PodSpec
-	var updateFunc func(context.Context, metav1.UpdateOptions) (interface{}, error)
-
-	// Pobierz odpowiedni zasób i przygotuj funkcję aktualizującą
-	switch kind {
-	case "Deployment":
-		deployment, err := clientset.AppsV1().Deployments(namespace).Get(context.Background(), name, metav1.GetOptions{})
-		if err != nil {
-			http.Error(w, "Nie znaleziono deploymentu", http.StatusNotFound)
-			return
-		}
-		podSpec = &deployment.Spec.Template.Spec
-		updateFunc = func(ctx context.Context, opts metav1.UpdateOptions) (interface{}, error) {
-			return clientset.AppsV1().Deployments(namespace).Update(ctx, deployment, opts)
-		}
-	case "StatefulSet":
-		statefulSet, err := clientset.AppsV1().StatefulSets(namespace).Get(context.Background(), name, metav1.GetOptions{})
-		if err != nil {
-			http.Error(w, "Nie znaleziono StatefulSet", http.StatusNotFound)
-			return
-		}
-		podSpec = &statefulSet.Spec.Template.Spec
-		updateFunc = func(ctx context.Context, opts metav1.UpdateOptions) (interface{}, error) {
-			return clientset.AppsV1().StatefulSets(namespace).Update(ctx, statefulSet, opts)
-		}
-	case "DaemonSet":
-		daemonSet, err := clientset.AppsV1().DaemonSets(namespace).Get(context.Background(), name, metav1.GetOptions{})
-		if err != nil {
-			http.Error(w, "Nie znaleziono DaemonSet", http.StatusNotFound)
-			return
-		}
-		podSpec = &daemonSet.Spec.Template.Spec
-		updateFunc = func(ctx context.Context, opts metav1.UpdateOptions) (interface{}, error) {
-			return clientset.AppsV1().DaemonSets(namespace).Update(ctx, daemonSet, opts)
-		}
-	// --- POCZĄTEK NOWEGO BLOKU ---
-	case "CronJob":
-		cronJob, err := clientset.BatchV1().CronJobs(namespace).Get(context.Background(), name, metav1.GetOptions{})
-		if err != nil {
-			http.Error(w, "Nie znaleziono CronJob", http.StatusNotFound)
-			return
-		}
-		podSpec = &cronJob.Spec.JobTemplate.Spec.Template.Spec
-		updateFunc = func(ctx context.Context, opts metav1.UpdateOptions) (interface{}, error) {
-			return clientset.BatchV1().CronJobs(namespace).Update(ctx, cronJob, opts)
-		}
-	// --- KONIEC NOWEGO BLOKU ---
-	default:
-		http.Error(w, "Nieobsługiwany typ zasobu", http.StatusBadRequest)
-		return
-	}
-
-	if len(podSpec.Containers) == 0 {
-		http.Error(w, "Zasób nie ma zdefiniowanych kontenerów", http.StatusInternalServerError)
-		return
-	}
-	container := &podSpec.Containers[0]
-	if container.Resources.Requests == nil {
-		container.Resources.Requests = make(corev1.ResourceList)
-	}
-	if container.Resources.Limits == nil {
-		container.Resources.Limits = make(corev1.ResourceList)
-	}
-
-	var parseErrors []string
-	applyChange := func(field **string, resourceName corev1.ResourceName, list corev1.ResourceList) {
-		if *field != nil {
-			if **field == "" {
-				delete(list, resourceName)
-			} else if qty, err := resource.ParseQuantity(**field); err == nil {
-				list[resourceName] = qty
-			} else {
-				parseErrors = append(parseErrors, fmt.Sprintf("Nieprawidłowa wartość %s: %v", resourceName, err))
-			}
-		}
-	}
-	applyChange(&reqUpdate.CpuRequests, corev1.ResourceCPU, container.Resources.Requests)
-	applyChange(&reqUpdate.CpuLimits, corev1.ResourceCPU, container.Resources.Limits)
-	applyChange(&reqUpdate.MemoryRequests, corev1.ResourceMemory, container.Resources.Requests)
-	applyChange(&reqUpdate.MemoryLimits, corev1.ResourceMemory, container.Resources.Limits)
-
-	if len(parseErrors) > 0 {
-		http.Error(w, strings.Join(parseErrors, "; "), http.StatusBadRequest)
-		return
-	}
-
-	_, err := updateFunc(context.Background(), metav1.UpdateOptions{})
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Błąd aktualizacji zasobu: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Zasoby dla %s/%s (%s) zaktualizowane pomyślnie", namespace, name, kind)
+	return points, nil
 }
 
 // Funkcja formatująca bajty (bez zmian)
