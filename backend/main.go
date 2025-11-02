@@ -13,7 +13,7 @@ import (
 	"time"
 
 	// Importy K8s
-
+	// <--- DODANY IMPORT
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -175,7 +175,7 @@ func getResourceTotals(spec corev1.PodSpec) (cpuReqTotal, cpuLimTotal, memReqTot
 	return
 }
 
-// Główny handler pobierający wszystkie workloadi (bez zmian)
+// Główny handler pobierający wszystkie workloadi (ZMODYFIKOWANY)
 func workloadsHandler(w http.ResponseWriter, _ *http.Request) {
 	var workloadInfos []WorkloadInfo
 	ctx := context.Background()
@@ -228,6 +228,23 @@ func workloadsHandler(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
+	// 4. Pobierz CronJobs
+	cronJobs, err := clientset.BatchV1().CronJobs("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.Printf("Błąd pobierania CronJobs: %v", err)
+	} else {
+		for _, item := range cronJobs.Items {
+			wlInfo := processWorkload(
+				item.Name,
+				item.Namespace,
+				"CronJob", // Nowy Kind
+				// CronJob ma szablon poda w innej ścieżce
+				item.Spec.JobTemplate.Spec.Template.Spec,
+			)
+			workloadInfos = append(workloadInfos, wlInfo)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(workloadInfos); err != nil {
 		http.Error(w, fmt.Sprintf("Błąd kodowania JSON: %v", err), http.StatusInternalServerError)
@@ -253,13 +270,28 @@ func processWorkload(name, namespace, kind string, podSpec corev1.PodSpec) Workl
 	p95MemQuery := fmt.Sprintf(p95MemQueryTemplate, selectorString)
 	p95MemUsage := queryPrometheusScalar(p95MemQuery)
 
-	// 3. Generuj rekomendacje (logika bez zmian)
-	var recommendations []string
+	// --- PRZENIESIONA LOGIKA OBLICZANIA KOSZTÓW (przed rekomendacjami) ---
 	cpuReqMilli := cpuReqTotal.MilliValue()
 	memReqBytes := memReqTotal.Value()
 	cpuLimMilli := cpuLimTotal.MilliValue()
 	memLimBytes := memLimTotal.Value()
-	// ... (cała logika rekomendacji bez zmian) ...
+
+	// Konwersja na jednostki bazowe (Core i GB)
+	cpuReqCores := float64(cpuReqMilli) / 1000.0
+	memReqGB := float64(memReqBytes) / (1024 * 1024 * 1024)
+
+	avgCpuCores := float64(avgCpuUsage) / 1000.0
+	avgMemGB := float64(avgMemUsage) / (1024 * 1024 * 1024)
+
+	// Obliczenie kosztów
+	reqCost := (cpuReqCores * costPerCpuCorePerMonth) + (memReqGB * costPerGbRamPerMonth)
+	usageCost := (avgCpuCores * costPerCpuCorePerMonth) + (avgMemGB * costPerGbRamPerMonth)
+	// --- KONIEC LOGIKI KOSZTÓW ---
+
+	// 3. Generuj rekomendacje
+	var recommendations []string
+
+	// ... (logika rekomendacji bez zmian) ...
 	if !hasCpuReq || !hasMemReq {
 		recommendations = append(recommendations, "Krytyczne: Brak zdefiniowanych żądań (requests) CPU lub Pamięci!")
 	}
@@ -273,23 +305,44 @@ func processWorkload(name, namespace, kind string, podSpec corev1.PodSpec) Workl
 			recommendations = append(recommendations, "Ostrzeżenie: Brak zdefiniowanego limitu (limits) Pamięci!")
 		}
 	}
+
+	// *** ZMIANA: REKOMENDACJA CPU Z FINOPS ***
 	if hasCpuReq && p95CpuUsage > 0 && cpuReqMilli > 0 {
 		usageRatio := float64(p95CpuUsage) / float64(cpuReqMilli)
 		if usageRatio < 0.3 && cpuReqMilli > minCpuRequestMilli {
+			// Oblicz sugerowane CPU
 			suggestedCpuMilli := int64(math.Max(float64(minCpuRequestMilli), math.Ceil(float64(p95CpuUsage)*1.5/10.0)*10.0))
 			suggestedCpuString := fmt.Sprintf("%dm", suggestedCpuMilli)
-			recommendations = append(recommendations, fmt.Sprintf("Info (7d p95): Niskie zużycie CPU (%dm - %.0f%% żądanych %s). Rozważ zmniejszenie żądań do %s.", p95CpuUsage, usageRatio*100, cpuReqTotal.String(), suggestedCpuString))
+
+			// Oblicz oszczędności
+			newCpuReqCores := float64(suggestedCpuMilli) / 1000.0
+			newReqCost := (newCpuReqCores * costPerCpuCorePerMonth) + (memReqGB * costPerGbRamPerMonth)
+			monthlySavings := reqCost - newReqCost
+
+			recommendationText := fmt.Sprintf("Info (7d p95): Niskie zużycie CPU (%dm - %.0f%% żądanych %s). Rozważ zmniejszenie żądań do %s (Oszczędność: %.2f zł/mc).", p95CpuUsage, usageRatio*100, cpuReqTotal.String(), suggestedCpuString, monthlySavings)
+			recommendations = append(recommendations, recommendationText)
 		}
 	}
+
+	// *** ZMIANA: REKOMENDACJA PAMIĘCI Z FINOPS ***
 	if hasMemReq && p95MemUsage > 0 && memReqBytes > 0 {
 		usageRatio := float64(p95MemUsage) / float64(memReqBytes)
 		if usageRatio < 0.3 && memReqBytes > minMemRequestBytes {
+			// Oblicz sugerowaną Pamięć
 			suggestedMemBytes := int64(math.Max(float64(minMemRequestBytes), float64(p95MemUsage)*1.5))
 			suggestedMemMiB := int64(math.Ceil(float64(suggestedMemBytes) / (1024 * 1024)))
 			suggestedMemString := fmt.Sprintf("%dMi", suggestedMemMiB)
-			recommendations = append(recommendations, fmt.Sprintf("Info (7d p95): Niskie zużycie Pamięci (%s - %.0f%% żądanej %s). Rozważ zmniejszenie żądań do %s.", formatBytesTrim(p95MemUsage), usageRatio*100, memReqTotal.String(), suggestedMemString))
+
+			// Oblicz oszczędności
+			newMemReqGB := float64(suggestedMemBytes) / (1024 * 1024 * 1024)
+			newReqCost := (cpuReqCores * costPerCpuCorePerMonth) + (newMemReqGB * costPerGbRamPerMonth)
+			monthlySavings := reqCost - newReqCost
+
+			recommendationText := fmt.Sprintf("Info (7d p95): Niskie zużycie Pamięci (%s - %.0f%% żądanej %s). Rozważ zmniejszenie żądań do %s (Oszczędność: %.2f zł/mc).", formatBytesTrim(p95MemUsage), usageRatio*100, memReqTotal.String(), suggestedMemString, monthlySavings)
+			recommendations = append(recommendations, recommendationText)
 		}
 	}
+
 	if hasCpuLim && cpuLimMilli > 0 && float64(avgCpuUsage) > 0.9*float64(cpuLimMilli) {
 		recommendations = append(recommendations, fmt.Sprintf("Ostrzeżenie (5m avg): Średnie zużycie CPU (%dm - %.0f%% limitu %s) bliskie limitu! Może wystąpić throttling.", avgCpuUsage, (float64(avgCpuUsage)/float64(cpuLimMilli))*100, cpuLimTotal.String()))
 	}
@@ -301,19 +354,6 @@ func processWorkload(name, namespace, kind string, podSpec corev1.PodSpec) Workl
 			recommendations = append(recommendations, fmt.Sprintf("Ostrzeżenie (aktualne): Średnie zużycie Pamięci (%s - %.0f%% limitu %s) jest wysokie.", formatBytesTrim(avgMemUsage), usageRatio*100, memLimTotal.String()))
 		}
 	}
-
-	// --- NOWA LOGIKA OBLICZANIA KOSZTÓW ---
-	// Konwersja na jednostki bazowe (Core i GB)
-	cpuReqCores := float64(cpuReqMilli) / 1000.0
-	memReqGB := float64(memReqBytes) / (1024 * 1024 * 1024)
-
-	avgCpuCores := float64(avgCpuUsage) / 1000.0
-	avgMemGB := float64(avgMemUsage) / (1024 * 1024 * 1024)
-
-	// Obliczenie kosztów
-	reqCost := (cpuReqCores * costPerCpuCorePerMonth) + (memReqGB * costPerGbRamPerMonth)
-	usageCost := (avgCpuCores * costPerCpuCorePerMonth) + (avgMemGB * costPerGbRamPerMonth)
-	// --- KONIEC LOGIKI KOSZTÓW ---
 
 	// 4. Zwróć gotową strukturę
 	return WorkloadInfo{
@@ -361,11 +401,37 @@ func queryPrometheusScalar(query string) int64 {
 	return int64(math.Round(float64(value)))
 }
 
-// Handler do pobierania metryk historycznych dla danego workloadu (bez zmian)
+// Handler do pobierania metryk historycznych dla danego workloadu (ZMODYFIKOWANY)
 func metricsHandler(w http.ResponseWriter, r *http.Request, namespace, kind, name string) {
+	// 1. Pobierz parametr 'range' z URL
+	rangeParam := r.URL.Query().Get("range")
+	if rangeParam == "" {
+		rangeParam = "1h" // Domyślna wartość
+	}
+
 	endTime := time.Now()
-	startTime := endTime.Add(-1 * time.Hour)
-	step := time.Minute
+	var startTime time.Time
+	var step time.Duration
+
+	// 2. Ustaw startTime i step na podstawie parametru
+	switch rangeParam {
+	case "6h":
+		startTime = endTime.Add(-6 * time.Hour)
+		step = 5 * time.Minute // Krok co 5 minut
+	case "24h":
+		startTime = endTime.Add(-24 * time.Hour)
+		step = 15 * time.Minute // Krok co 15 minut
+	case "7d":
+		startTime = endTime.Add(-7 * 24 * time.Hour)
+		step = time.Hour // Krok co 1 godzinę
+	case "1h":
+		fallthrough // Przejdź do domyślnego
+	default:
+		startTime = endTime.Add(-1 * time.Hour)
+		step = time.Minute // Krok co 1 minutę
+	}
+
+	// 3. Zbuduj zakres dla Prometheusa
 	promRange := prometheusv1.Range{
 		Start: startTime,
 		End:   endTime,
@@ -419,7 +485,7 @@ func queryPrometheusRange(query string, promRange prometheusv1.Range) []MetricPo
 	return points
 }
 
-// Handler do aktualizacji zasobów dla danego workloadu (bez zmian)
+// Handler do aktualizacji zasobów dla danego workloadu (ZMODYFIKOWANY)
 func updateWorkloadResourcesHandler(w http.ResponseWriter, r *http.Request, namespace, kind, name string) {
 	var reqUpdate ResourceUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&reqUpdate); err != nil {
@@ -462,6 +528,18 @@ func updateWorkloadResourcesHandler(w http.ResponseWriter, r *http.Request, name
 		updateFunc = func(ctx context.Context, opts metav1.UpdateOptions) (interface{}, error) {
 			return clientset.AppsV1().DaemonSets(namespace).Update(ctx, daemonSet, opts)
 		}
+	// --- POCZĄTEK NOWEGO BLOKU ---
+	case "CronJob":
+		cronJob, err := clientset.BatchV1().CronJobs(namespace).Get(context.Background(), name, metav1.GetOptions{})
+		if err != nil {
+			http.Error(w, "Nie znaleziono CronJob", http.StatusNotFound)
+			return
+		}
+		podSpec = &cronJob.Spec.JobTemplate.Spec.Template.Spec
+		updateFunc = func(ctx context.Context, opts metav1.UpdateOptions) (interface{}, error) {
+			return clientset.BatchV1().CronJobs(namespace).Update(ctx, cronJob, opts)
+		}
+	// --- KONIEC NOWEGO BLOKU ---
 	default:
 		http.Error(w, "Nieobsługiwany typ zasobu", http.StatusBadRequest)
 		return

@@ -3,7 +3,8 @@ import {
   AppBar, Toolbar, Typography, Container, Paper, TableContainer, Table,
   TableHead, TableBody, TableRow, TableCell, CircularProgress, Alert as MuiAlert,
   Modal, Box, Button, Chip, Dialog, DialogActions, DialogContent,
-  DialogContentText, DialogTitle, Snackbar, IconButton, TextField, Tooltip
+  DialogContentText, DialogTitle, Snackbar, IconButton, TextField, Tooltip,
+  ToggleButton, ToggleButtonGroup // <--- NOWY IMPORT
 } from '@mui/material';
 import InfoIcon from '@mui/icons-material/Info';
 import ApplyChangesIcon from '@mui/icons-material/Send';
@@ -15,22 +16,30 @@ import './App.css';
 // Funkcja formatBytes (bez zmian)
 function formatBytes(bytes, decimals = 2) { if (!bytes || bytes === 0) return '0 Bytes'; const k = 1024; const dm = decimals < 0 ? 0 : decimals; const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']; const i = Math.floor(Math.log(bytes) / Math.log(k)); if (i < 0 || i >= sizes.length) return '0 Bytes'; return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]; }
 
-// --- NOWA FUNKCJA FORMATOWANIA WALUTY ---
-// Na razie na sztywno w PLN (zł), zgodnie z planem
+// Funkcja formatowania waluty (bez zmian)
 function formatCurrency(value) {
   if (value === null || typeof value === 'undefined') {
     return '-';
   }
   return `${value.toFixed(2)} zł`; // Na razie hardkodujemy PLN
 }
-// --- KONIEC NOWEJ FUNKCJI ---
 
 // Style Modali (bez zmian)
 const modalStyle = { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 600, bgcolor: 'background.paper', border: '2px solid #000', boxShadow: 24, p: 4, color: 'white', backgroundColor: '#424242' };
 const chartModalStyle = { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '70%', maxWidth: 900, bgcolor: 'background.paper', border: '2px solid #000', boxShadow: 24, p: 4 };
 
-// Funkcja parsowania rekomendacji (bez zmian)
-function parseActionableRecommendation(recText) { const matchCpu = recText.match(/Niskie zużycie CPU.*?Rozważ zmniejszenie żądań do (\d+m)\./i); if (matchCpu && matchCpu[1]) { return { type: 'apply', resource: 'cpuRequests', value: matchCpu[1], text: recText }; } const matchMem = recText.match(/Niskie zużycie Pamięci.*?Rozważ zmniejszenie żądań do (\d+(Mi|Gi))\./i); if (matchMem && matchMem[1]) { return { type: 'apply', resource: 'memoryRequests', value: matchMem[1], text: recText }; } return { type: 'info', text: recText }; }
+// Funkcja parsowania rekomendacji (bez zmian, zawiera poprawkę dla FinOps)
+function parseActionableRecommendation(recText) {
+  const matchCpu = recText.match(/Niskie zużycie CPU.*?Rozważ zmniejszenie żądań do (\d+m)/i);
+  if (matchCpu && matchCpu[1]) {
+    return { type: 'apply', resource: 'cpuRequests', value: matchCpu[1], text: recText };
+  }
+  const matchMem = recText.match(/Niskie zużycie Pamięci.*?Rozważ zmniejszenie żądań do (\d+(Mi|Gi))/i);
+  if (matchMem && matchMem[1]) {
+    return { type: 'apply', resource: 'memoryRequests', value: matchMem[1], text: recText };
+  }
+  return { type: 'info', text: recText };
+}
 
 // Funkcje parsowania zasobów (bez zmian)
 function parseCpu(valueString) {
@@ -54,22 +63,32 @@ function parseMemory(valueString) {
   return value;
 }
 
-// Komponent ChartModal (bez zmian)
+// *** KOMPONENT ChartModal ZMODYFIKOWANY ***
 function ChartModal({ workload, open, onClose }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState({ cpuUsage: [], memoryUsage: [] });
+  // NOWY STAN: Przechowuje wybrany zakres czasu
+  const [timeRange, setTimeRange] = useState('1h');
 
   const cpuReq = parseCpu(workload?.cpuRequests);
   const cpuLim = parseCpu(workload?.cpuLimits);
   const memReq = parseMemory(workload?.memoryRequests);
   const memLim = parseMemory(workload?.memoryLimits);
 
+  // NOWA FUNKCJA: Handler dla zmiany zakresu czasu
+  const handleTimeRangeChange = (event, newRange) => {
+    if (newRange) {
+      setTimeRange(newRange);
+    }
+  };
+
   useEffect(() => {
     if (open && workload) {
       setLoading(true);
       setError(null);
-      fetch(`/api/workloads/${workload.namespace}/${workload.kind}/${workload.name}/metrics`)
+      // ZMODYFIKOWANY FETCH: Dodaje ?range=...
+      fetch(`/api/workloads/${workload.namespace}/${workload.kind}/${workload.name}/metrics?range=${timeRange}`)
         .then(response => {
           if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
           return response.json();
@@ -85,11 +104,18 @@ function ChartModal({ workload, open, onClose }) {
         })
         .finally(() => setLoading(false));
     }
-  }, [open, workload]);
+  }, [open, workload, timeRange]); // DODANY timeRange do dependency array
 
   const memValueFormatter = (value) => formatBytes(value, 0);
   const cpuValueFormatter = (value) => `${value.toFixed(0)}m`;
-  const timeFormatter = (date) => date.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+
+  // ZMODYFIKOWANY FORMATER: Inaczej formatuje datę dla 7d
+  const timeFormatter = (date) => {
+    if (timeRange === '7d') {
+      return date.toLocaleDateString('pl-PL', { month: '2-digit', day: '2-digit' });
+    }
+    return date.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+  };
 
   const getAxisBounds = (dataPoints, req, lim) => {
     const values = dataPoints.map(d => d.y);
@@ -115,14 +141,31 @@ function ChartModal({ workload, open, onClose }) {
   return (
     <Modal open={open} onClose={onClose}>
       <Box sx={chartModalStyle}>
-        <Typography variant="h6" component="h2">
-          Metrics (Last 1h): {workload?.namespace}/{workload?.name}
-        </Typography>
+        {/* NOWY HEADER: Tytuł i przyciski w jednym rzędzie */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h6" component="h2">
+            Metrics: {workload?.namespace}/{workload?.name}
+          </Typography>
+          <ToggleButtonGroup
+            color="primary"
+            value={timeRange}
+            exclusive
+            onChange={handleTimeRangeChange}
+            size="small"
+          >
+            <ToggleButton value="1h">1H</ToggleButton>
+            <ToggleButton value="6h">6H</ToggleButton>
+            <ToggleButton value="24h">24H</ToggleButton>
+            <ToggleButton value="7d">7D</ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+        
         {loading && ( <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}><CircularProgress /></Box> )}
         {error && ( <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}><MuiAlert severity="error">{error}</MuiAlert></Box> )}
         {!loading && !error && (
           <Box sx={{ mt: 3 }}>
-            <Typography variant="subtitle1">CPU Usage (avg 5m)</Typography>
+            {/* ZMODYFIKOWANY TYTUŁ: Pokazuje zakres */}
+            <Typography variant="subtitle1">CPU Usage (avg 5m) - Last {timeRange}</Typography>
             {data.cpuUsage.length > 0 ? (
               <Box sx={{ height: 300, width: '100%' }}>
                 <LineChart
@@ -139,7 +182,8 @@ function ChartModal({ workload, open, onClose }) {
               </Box>
             ) : <Typography>No CPU data available.</Typography>}
 
-            <Typography variant="subtitle1" sx={{ mt: 4 }}>Memory Usage (Working Set)</Typography>
+            {/* ZMODYFIKOWANY TYTUŁ: Pokazuje zakres */}
+            <Typography variant="subtitle1" sx={{ mt: 4 }}>Memory Usage (Working Set) - Last {timeRange}</Typography>
             {data.memoryUsage.length > 0 ? (
               <Box sx={{ height: 300, width: '100%' }}>
                 <LineChart
@@ -280,7 +324,18 @@ function App() {
     });
   };
 
-  if (error && !loading) { /* ... (obsługa błędów bez zmian) ... */ }
+  // Obsługa błędu (bez zmian)
+  if (error && !loading) {
+    return (
+      <Container maxWidth="lg" sx={{ mt: 4 }}>
+        <MuiAlert severity="error" variant="filled">
+          <Typography variant="h6">Failed to connect to backend</Typography>
+          <pre>{error}</pre>
+          <Typography>Ensure the backend server is running on port 8080 and the Vite proxy is configured.</Typography>
+        </MuiAlert>
+      </Container>
+    );
+  }
 
   return (
     <>
@@ -298,17 +353,15 @@ function App() {
                      <TableCell>Name</TableCell>
                      <TableCell>CPU Req.</TableCell> <TableCell>CPU Lim.</TableCell> <TableCell>CPU Usage</TableCell>
                      <TableCell>Mem Req.</TableCell> <TableCell>Mem Lim.</TableCell> <TableCell>Mem Usage</TableCell>
-                     {/* --- NOWE NAGŁÓWKI FINOPS --- */}
                      <TableCell align="right">Koszt (Żądany)</TableCell>
                      <TableCell align="right">Koszt (Zużycie)</TableCell>
-                     {/* --- KONIEC NOWYCH NAGŁÓWKÓW --- */}
                      <TableCell align="center">Recs 💡</TableCell>
                      <TableCell align="center">Edit ✏️</TableCell>
                      <TableCell align="center">Chart 📈</TableCell>
                    </TableRow>
                  </TableHead>
                  <TableBody>
-                   {/* --- Zwiększony colspan do 14 --- */}
+                   {/* Colspan 14 - bez zmian */}
                    {!error && workloads.length === 0 && <TableRow><TableCell colSpan={14} align="center">No workloads found in cluster.</TableCell></TableRow>}
                    {!error && workloads.map((workload) => (
                      <TableRow hover key={`${workload.namespace}-${workload.kind}-${workload.name}`}>
@@ -321,10 +374,8 @@ function App() {
                        <TableCell>{workload.memoryRequests || '-'}</TableCell>
                        <TableCell>{workload.memoryLimits === "0" ? '-' : workload.memoryLimits}</TableCell>
                        <TableCell>{formatBytes(workload.avgMemoryUsage)}</TableCell>
-                       {/* --- NOWE KOMÓRKI FINOPS --- */}
                        <TableCell align="right">{formatCurrency(workload.requestCost)}</TableCell>
                        <TableCell align="right">{formatCurrency(workload.usageCost)}</TableCell>
-                       {/* --- KONIEC NOWYCH KOMÓREK --- */}
                        <TableCell align="center">
                          {workload.recommendations.length > 0 ? ( <Chip icon={<InfoIcon />} label={workload.recommendations.length} onClick={() => handleShowDetails(workload)} color="warning" size="small" clickable /> ) : ( <Chip label="0" size="small" /> )}
                        </TableCell>
@@ -413,7 +464,7 @@ function App() {
         </MuiAlert>
       </Snackbar>
 
-      {/* Modal Wykresu (bez zmian) */}
+      {/* Modal Wykresu (bez zmian, przekazuje propsy) */}
       <ChartModal
         open={Boolean(chartWorkload)}
         onClose={handleCloseChartModal}
