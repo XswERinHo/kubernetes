@@ -23,6 +23,7 @@ Celem jest stworzenie inteligentnego asystenta, który aktywnie pomaga w optymal
 * Integracja z API chmury lub Kubecost/OpenCost.
 * Kwantyfikacja finansowa rekomendacji (szacowane oszczędności).
 * Możliwości alokacji kosztów (Showback/Chargeback).
+* **Powiązanie z i18n:** Backend powinien obliczać koszty w jednej walucie bazowej. Frontend powinien być odpowiedzialny za **przewalutowanie** i formatowanie kwot w zależności od wybranego języka (np. PLN dla języka polskiego, USD dla angielskiego).
 
 ### 4. Ułatwione Zarządzanie i Działanie ⚙️
 * Akcje "jednym kliknięciem" do stosowania rekomendacji.
@@ -35,6 +36,8 @@ Celem jest stworzenie inteligentnego asystenta, który aktywnie pomaga w optymal
 * Zaawansowane filtrowanie i wyszukiwanie.
 * Czytelne wykresy danych historycznych (wzbogacone o kontekst requests/limits).
 * Konfigurowalne alerty i powiadomienia.
+* **Internacjonalizacja (i18n):** Pełne wsparcie dla co najmniej dwóch języków (polski, angielski), włączając w to etykiety, tekst i formatowanie walut.
+* **Tryby kolorystyczne:** Możliwość przełączania motywu (np. jasny / ciemny).
 * Uwierzytelnianie i Role-Based Access Control (RBAC) z podziałem na role:
     * **Admin:** Pełna kontrola nad aplikacją, może edytować zasoby i zatwierdzać zmiany innych.
     * **Editor (Moderator):** Może aplikować automatyczne rekomendacje. Ręczne edycje wymagają zatwierdzenia przez Admina.
