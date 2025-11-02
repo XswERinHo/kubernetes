@@ -1,0 +1,57 @@
+{
+  "nav": {
+    "dashboard": "Panel Główny",
+    "workloads": "Zasoby",
+    "settings": "Ustawienia"
+  },
+  "settings": {
+    "title": "Ustawienia",
+    "appearance": "Wygląd",
+    "dark_mode": "Tryb Ciemny",
+    "light_mode": "Tryb Jasny",
+    "theme_toggle_desc": "Przełączaj między jasnym i ciemnym motywem aplikacji.",
+    "language": "Język (i18n)",
+    "language_desc": "Wybierz język aplikacji."
+  },
+  "dashboard": {
+    "kpi_usage_cost": "Całkowity Koszt Zużycia (Mc)",
+    "kpi_savings": "Potencjalne Oszczędności (Mc)",
+    "kpi_request_cost": "Całkowity Koszt Żądany (Mc)",
+    "kpi_critical_recs": "Rekomendacje Krytyczne",
+    "chart_title": "Koszt Zużycia wg Przestrzeni Nazw",
+    "summary_title": "Podsumowanie Klastra",
+    "summary_workloads": "Zasoby",
+    "summary_namespaces": "Przestrzenie Nazw",
+    "no_cost_data": "Brak danych o kosztach do wyświetlenia."
+  },
+  "workloads": {
+    "search_label": "Szukaj po nazwie...",
+    "ns_label": "Przestrzeń Nazw",
+    "ns_all": "Wszystkie Przestrzenie Nazw",
+    "no_workloads_found": "Nie znaleziono zasobów pasujących do kryteriów.",
+    "recs_chip": "{{count}} Rek.",
+    "usage_cost": "Koszt (Zużycie):",
+    "request_cost": "Koszt (Żądany):"
+  },
+  "workload_card": {
+    "recommendations_ok": "OK",
+    "cpu_usage": "Zużycie CPU",
+    "mem_usage": "Zużycie Pamięci",
+    "cost_usage": "Koszt (Zużycie):",
+    "cost_request": "Koszt (Żądany):",
+    "tooltip_edit": "Edytuj Zasoby",
+    "tooltip_chart": "Pokaż Wykres Metryk"
+  },
+  "chart_modal": {
+    "title": "Metryki: {{namespace}}/{{name}}",
+    "cpu_title": "Zużycie CPU (śr. 5m) - Ostatnie {{timeRange}}",
+    "mem_title": "Zużycie Pamięci (Zestaw Roboczy) - Ostatnie {{timeRange}}",
+    "no_cpu_data": "Brak danych o zużyciu CPU.",
+    "no_mem_data": "Brak danych o zużyciu Pamięci.",
+    "cpu_req_label": "Żądanie ({{value}}m)",
+    "cpu_lim_label": "Limit ({{value}}m)",
+    "mem_req_label": "Żądanie ({{value}})",
+    "mem_lim_label": "Limit ({{value}})",
+    "close_btn": "Zamknij"
+  }
+}

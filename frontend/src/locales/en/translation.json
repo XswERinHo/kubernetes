@@ -1,0 +1,57 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "workloads": "Workloads",
+    "settings": "Settings"
+  },
+  "settings": {
+    "title": "Settings",
+    "appearance": "Appearance",
+    "dark_mode": "Dark Mode",
+    "light_mode": "Light Mode",
+    "theme_toggle_desc": "Toggle between light and dark themes for the application.",
+    "language": "Language (i18n)",
+    "language_desc": "Select the application language."
+  },
+  "dashboard": {
+    "kpi_usage_cost": "Total Usage Cost (Month)",
+    "kpi_savings": "Potential Monthly Savings",
+    "kpi_request_cost": "Total Request Cost (Month)",
+    "kpi_critical_recs": "Critical Recommendations",
+    "chart_title": "Usage Cost by Namespace",
+    "summary_title": "Cluster Summary",
+    "summary_workloads": "Workloads",
+    "summary_namespaces": "Namespaces",
+    "no_cost_data": "No cost data to display."
+  },
+  "workloads": {
+    "search_label": "Search by name...",
+    "ns_label": "Namespace",
+    "ns_all": "All Namespaces",
+    "no_workloads_found": "No workloads found matching your criteria.",
+    "recs_chip": "{{count}} Recs",
+    "usage_cost": "Usage Cost:",
+    "request_cost": "Request Cost:"
+  },
+  "workload_card": {
+    "recommendations_ok": "OK",
+    "cpu_usage": "CPU Usage",
+    "mem_usage": "Memory Usage",
+    "cost_usage": "Usage Cost:",
+    "cost_request": "Request Cost:",
+    "tooltip_edit": "Edit Resources",
+    "tooltip_chart": "Show Metrics Chart"
+  },
+  "chart_modal": {
+    "title": "Metrics: {{namespace}}/{{name}}",
+    "cpu_title": "CPU Usage (avg 5m) - Last {{timeRange}}",
+    "mem_title": "Memory Usage (Working Set) - Last {{timeRange}}",
+    "no_cpu_data": "No CPU data available.",
+    "no_mem_data": "No Memory data available.",
+    "cpu_req_label": "Request ({{value}}m)",
+    "cpu_lim_label": "Limit ({{value}}m)",
+    "mem_req_label": "Request ({{value}})",
+    "mem_lim_label": "Limit ({{value}})",
+    "close_btn": "Close"
+  }
+}
