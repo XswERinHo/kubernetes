@@ -13,6 +13,7 @@ import (
 	"time"
 
 	// Importy K8s
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,6 +38,9 @@ type WorkloadInfo struct {
 	AvgCpuUsage     int64    `json:"avgCpuUsage"`
 	AvgMemoryUsage  int64    `json:"avgMemoryUsage"`
 	Recommendations []string `json:"recommendations"`
+	// --- NOWE POLA FINOPS ---
+	RequestCost float64 `json:"requestCost"`
+	UsageCost   float64 `json:"usageCost"`
 }
 
 // ResourceUpdateRequest - struktura do aktualizacji zasobów
@@ -63,11 +67,20 @@ var promAPI prometheusv1.API
 var minCpuRequestMilli int64 = 50
 var minMemRequestBytes int64 = 64 * 1024 * 1024 // 64Mi
 
-// POWRÓT DO PROSTYCH SZABLONÓW ZAPYTAŃ Z WYRAŻENIAMI REGULARNYMI
+// --- NOWE ZMIENNE FINOPS (CENNIK BAZOWY W PLN) ---
+var costPerCpuCorePerMonth float64 = 80.0 // Przykładowo 80 PLN / vCPU / miesiąc
+var costPerGbRamPerMonth float64 = 40.0   // Przykładowo 40 PLN / GB RAM / miesiąc
+// --- KONIEC ZMIENNYCH FINOPS ---
+
+// Szablony zapytań PromQL (AVG bez zmian)
 const avgCpuQueryTemplate = `sum(rate(container_cpu_usage_seconds_total%s[5m])) * 1000`
 const avgMemQueryTemplate = `sum(container_memory_working_set_bytes%s)`
+
+// --- POPRAWIONE ZAPYTANIA P95 (NAPRAWIA BŁĄD 'subquery') ---
 const p95CpuQueryTemplate = `sum(quantile_over_time(0.95, rate(container_cpu_usage_seconds_total%s[5m])[7d:5m])) * 1000`
 const p95MemQueryTemplate = `sum(quantile_over_time(0.95, container_memory_working_set_bytes%s[7d:5m]))`
+
+// --- KONIEC POPRAWKI ---
 
 func main() {
 	// Inicjalizacja K8s
@@ -134,12 +147,12 @@ func main() {
 	}
 }
 
-// PROSTA FUNKCJA BUDUJĄCA SELEKTOR Z REGEXEM (jak w starym, działającym kodzie)
+// Prosta funkcja budująca selektor (bez zmian)
 func buildPrometheusSelector(namespace, workloadName string) string {
 	return fmt.Sprintf(`{namespace="%s", pod=~"%s-.*"}`, namespace, workloadName)
 }
 
-// Funkcja pomocnicza do odczytu zasobów
+// Funkcja pomocnicza do odczytu zasobów (bez zmian)
 func getResourceTotals(spec corev1.PodSpec) (cpuReqTotal, cpuLimTotal, memReqTotal, memLimTotal resource.Quantity, hasCpuReq, hasMemReq, hasCpuLim, hasMemLim bool) {
 	for _, container := range spec.Containers {
 		if reqCpu, ok := container.Resources.Requests[corev1.ResourceCPU]; ok && reqCpu.Value() > 0 {
@@ -162,7 +175,7 @@ func getResourceTotals(spec corev1.PodSpec) (cpuReqTotal, cpuLimTotal, memReqTot
 	return
 }
 
-// Główny handler pobierający wszystkie workloadi
+// Główny handler pobierający wszystkie workloadi (bez zmian)
 func workloadsHandler(w http.ResponseWriter, _ *http.Request) {
 	var workloadInfos []WorkloadInfo
 	ctx := context.Background()
@@ -221,13 +234,13 @@ func workloadsHandler(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// ZMODYFIKOWANA funkcja przetwarzająca pojedynczy workload
+// ZMODYFIKOWANA funkcja przetwarzająca pojedynczy workload (dodane koszty)
 func processWorkload(name, namespace, kind string, podSpec corev1.PodSpec) WorkloadInfo {
 	// 1. Pobierz zasoby (Requests/Limits)
 	cpuReqTotal, cpuLimTotal, memReqTotal, memLimTotal,
 		hasCpuReq, hasMemReq, hasCpuLim, hasMemLim := getResourceTotals(podSpec)
 
-	// 2. Pobierz metryki z Prometheusa używając prostego selektora z regexem
+	// 2. Pobierz metryki z Prometheusa
 	selectorString := buildPrometheusSelector(namespace, name)
 
 	avgCpuQuery := fmt.Sprintf(avgCpuQueryTemplate, selectorString)
@@ -240,8 +253,13 @@ func processWorkload(name, namespace, kind string, podSpec corev1.PodSpec) Workl
 	p95MemQuery := fmt.Sprintf(p95MemQueryTemplate, selectorString)
 	p95MemUsage := queryPrometheusScalar(p95MemQuery)
 
-	// 3. Generuj rekomendacje
+	// 3. Generuj rekomendacje (logika bez zmian)
 	var recommendations []string
+	cpuReqMilli := cpuReqTotal.MilliValue()
+	memReqBytes := memReqTotal.Value()
+	cpuLimMilli := cpuLimTotal.MilliValue()
+	memLimBytes := memLimTotal.Value()
+	// ... (cała logika rekomendacji bez zmian) ...
 	if !hasCpuReq || !hasMemReq {
 		recommendations = append(recommendations, "Krytyczne: Brak zdefiniowanych żądań (requests) CPU lub Pamięci!")
 	}
@@ -255,11 +273,6 @@ func processWorkload(name, namespace, kind string, podSpec corev1.PodSpec) Workl
 			recommendations = append(recommendations, "Ostrzeżenie: Brak zdefiniowanego limitu (limits) Pamięci!")
 		}
 	}
-	cpuReqMilli := cpuReqTotal.MilliValue()
-	memReqBytes := memReqTotal.Value()
-	cpuLimMilli := cpuLimTotal.MilliValue()
-	memLimBytes := memLimTotal.Value()
-
 	if hasCpuReq && p95CpuUsage > 0 && cpuReqMilli > 0 {
 		usageRatio := float64(p95CpuUsage) / float64(cpuReqMilli)
 		if usageRatio < 0.3 && cpuReqMilli > minCpuRequestMilli {
@@ -289,6 +302,19 @@ func processWorkload(name, namespace, kind string, podSpec corev1.PodSpec) Workl
 		}
 	}
 
+	// --- NOWA LOGIKA OBLICZANIA KOSZTÓW ---
+	// Konwersja na jednostki bazowe (Core i GB)
+	cpuReqCores := float64(cpuReqMilli) / 1000.0
+	memReqGB := float64(memReqBytes) / (1024 * 1024 * 1024)
+
+	avgCpuCores := float64(avgCpuUsage) / 1000.0
+	avgMemGB := float64(avgMemUsage) / (1024 * 1024 * 1024)
+
+	// Obliczenie kosztów
+	reqCost := (cpuReqCores * costPerCpuCorePerMonth) + (memReqGB * costPerGbRamPerMonth)
+	usageCost := (avgCpuCores * costPerCpuCorePerMonth) + (avgMemGB * costPerGbRamPerMonth)
+	// --- KONIEC LOGIKI KOSZTÓW ---
+
 	// 4. Zwróć gotową strukturę
 	return WorkloadInfo{
 		Name:            name,
@@ -301,10 +327,12 @@ func processWorkload(name, namespace, kind string, podSpec corev1.PodSpec) Workl
 		AvgCpuUsage:     avgCpuUsage,
 		AvgMemoryUsage:  avgMemUsage,
 		Recommendations: recommendations,
+		RequestCost:     reqCost,   // Dodane
+		UsageCost:       usageCost, // Dodane
 	}
 }
 
-// Funkcja do wykonywania zapytań skalarnych do Prometheusa
+// Funkcja do wykonywania zapytań skalarnych do Prometheusa (bez zmian)
 func queryPrometheusScalar(query string) int64 {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -333,7 +361,7 @@ func queryPrometheusScalar(query string) int64 {
 	return int64(math.Round(float64(value)))
 }
 
-// Handler do pobierania metryk historycznych dla danego workloadu
+// Handler do pobierania metryk historycznych dla danego workloadu (bez zmian)
 func metricsHandler(w http.ResponseWriter, r *http.Request, namespace, kind, name string) {
 	endTime := time.Now()
 	startTime := endTime.Add(-1 * time.Hour)
@@ -344,7 +372,6 @@ func metricsHandler(w http.ResponseWriter, r *http.Request, namespace, kind, nam
 		Step:  step,
 	}
 
-	// ZMIANA: Użycie prostego selektora z regexem
 	selectorString := buildPrometheusSelector(namespace, name)
 	cpuQuery := fmt.Sprintf(avgCpuQueryTemplate, selectorString)
 	memQuery := fmt.Sprintf(avgMemQueryTemplate, selectorString)
@@ -360,7 +387,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request, namespace, kind, nam
 	}
 }
 
-// Funkcja do pobierania danych historycznych (range query)
+// Funkcja do pobierania danych historycznych (range query) (bez zmian)
 func queryPrometheusRange(query string, promRange prometheusv1.Range) []MetricPoint {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -392,7 +419,7 @@ func queryPrometheusRange(query string, promRange prometheusv1.Range) []MetricPo
 	return points
 }
 
-// Handler do aktualizacji zasobów dla danego workloadu
+// Handler do aktualizacji zasobów dla danego workloadu (bez zmian)
 func updateWorkloadResourcesHandler(w http.ResponseWriter, r *http.Request, namespace, kind, name string) {
 	var reqUpdate ResourceUpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&reqUpdate); err != nil {
@@ -484,7 +511,7 @@ func updateWorkloadResourcesHandler(w http.ResponseWriter, r *http.Request, name
 	fmt.Fprintf(w, "Zasoby dla %s/%s (%s) zaktualizowane pomyślnie", namespace, name, kind)
 }
 
-// Funkcja formatująca bajty
+// Funkcja formatująca bajty (bez zmian)
 func formatBytesTrim(bytes int64, decimals ...int) string {
 	if bytes == 0 {
 		return "0B"

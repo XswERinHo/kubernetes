@@ -15,6 +15,16 @@ import './App.css';
 // Funkcja formatBytes (bez zmian)
 function formatBytes(bytes, decimals = 2) { if (!bytes || bytes === 0) return '0 Bytes'; const k = 1024; const dm = decimals < 0 ? 0 : decimals; const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']; const i = Math.floor(Math.log(bytes) / Math.log(k)); if (i < 0 || i >= sizes.length) return '0 Bytes'; return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]; }
 
+// --- NOWA FUNKCJA FORMATOWANIA WALUTY ---
+// Na razie na sztywno w PLN (zł), zgodnie z planem
+function formatCurrency(value) {
+  if (value === null || typeof value === 'undefined') {
+    return '-';
+  }
+  return `${value.toFixed(2)} zł`; // Na razie hardkodujemy PLN
+}
+// --- KONIEC NOWEJ FUNKCJI ---
+
 // Style Modali (bez zmian)
 const modalStyle = { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 600, bgcolor: 'background.paper', border: '2px solid #000', boxShadow: 24, p: 4, color: 'white', backgroundColor: '#424242' };
 const chartModalStyle = { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '70%', maxWidth: 900, bgcolor: 'background.paper', border: '2px solid #000', boxShadow: 24, p: 4 };
@@ -44,7 +54,7 @@ function parseMemory(valueString) {
   return value;
 }
 
-// Komponent ChartModal (zmieniono nazwę propsu 'deployment' na 'workload' dla spójności)
+// Komponent ChartModal (bez zmian)
 function ChartModal({ workload, open, onClose }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -59,7 +69,6 @@ function ChartModal({ workload, open, onClose }) {
     if (open && workload) {
       setLoading(true);
       setError(null);
-      // ZMIANA: Użycie nowego, elastycznego endpointu
       fetch(`/api/workloads/${workload.namespace}/${workload.kind}/${workload.name}/metrics`)
         .then(response => {
           if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -154,6 +163,7 @@ function ChartModal({ workload, open, onClose }) {
   );
 }
 
+
 function App() {
   const [workloads, setWorkloads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -169,7 +179,7 @@ function App() {
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState('success');
 
-  // ZMIANA: Użycie nowego endpointu /api/workloads
+  // Pobieranie danych (bez zmian)
   const fetchData = () => {
     setLoading(true);
     setError(null);
@@ -190,6 +200,7 @@ function App() {
   };
   useEffect(() => { fetchData(); }, []);
 
+  // Handlery (bez zmian)
   const handleShowDetails = (workload) => setSelectedWorkload(workload);
   const handleCloseDetails = () => setSelectedWorkload(null);
   const handleOpenEditModal = (workload) => {
@@ -237,7 +248,7 @@ function App() {
 
   const handleSnackbarClose = () => { setSnackbarOpen(false); };
 
-  // ZMIANA: Użycie nowego endpointu do aktualizacji zasobów
+  // Funkcja API (bez zmian)
   const applyResourceUpdate = (workload, body) => {
     const { namespace, name, kind } = workload;
     fetch(`/api/workloads/${namespace}/${kind}/${name}/resources`, {
@@ -287,13 +298,18 @@ function App() {
                      <TableCell>Name</TableCell>
                      <TableCell>CPU Req.</TableCell> <TableCell>CPU Lim.</TableCell> <TableCell>CPU Usage</TableCell>
                      <TableCell>Mem Req.</TableCell> <TableCell>Mem Lim.</TableCell> <TableCell>Mem Usage</TableCell>
+                     {/* --- NOWE NAGŁÓWKI FINOPS --- */}
+                     <TableCell align="right">Koszt (Żądany)</TableCell>
+                     <TableCell align="right">Koszt (Zużycie)</TableCell>
+                     {/* --- KONIEC NOWYCH NAGŁÓWKÓW --- */}
                      <TableCell align="center">Recs 💡</TableCell>
                      <TableCell align="center">Edit ✏️</TableCell>
                      <TableCell align="center">Chart 📈</TableCell>
                    </TableRow>
                  </TableHead>
                  <TableBody>
-                   {!error && workloads.length === 0 && <TableRow><TableCell colSpan={12} align="center">No workloads found in cluster.</TableCell></TableRow>}
+                   {/* --- Zwiększony colspan do 14 --- */}
+                   {!error && workloads.length === 0 && <TableRow><TableCell colSpan={14} align="center">No workloads found in cluster.</TableCell></TableRow>}
                    {!error && workloads.map((workload) => (
                      <TableRow hover key={`${workload.namespace}-${workload.kind}-${workload.name}`}>
                        <TableCell>{workload.namespace}</TableCell>
@@ -305,11 +321,13 @@ function App() {
                        <TableCell>{workload.memoryRequests || '-'}</TableCell>
                        <TableCell>{workload.memoryLimits === "0" ? '-' : workload.memoryLimits}</TableCell>
                        <TableCell>{formatBytes(workload.avgMemoryUsage)}</TableCell>
+                       {/* --- NOWE KOMÓRKI FINOPS --- */}
+                       <TableCell align="right">{formatCurrency(workload.requestCost)}</TableCell>
+                       <TableCell align="right">{formatCurrency(workload.usageCost)}</TableCell>
+                       {/* --- KONIEC NOWYCH KOMÓREK --- */}
                        <TableCell align="center">
                          {workload.recommendations.length > 0 ? ( <Chip icon={<InfoIcon />} label={workload.recommendations.length} onClick={() => handleShowDetails(workload)} color="warning" size="small" clickable /> ) : ( <Chip label="0" size="small" /> )}
                        </TableCell>
-
-                       {/* ZMIANA: Usunięto atrybut 'disabled' i zaktualizowano Tooltip */}
                        <TableCell align="center">
                          <Tooltip title="Edit Resources">
                            <IconButton size="small" onClick={() => handleOpenEditModal(workload)}>
@@ -371,7 +389,7 @@ function App() {
           <Button onClick={handleFormSubmit} variant="contained">Save Changes</Button>
         </DialogActions>
       </Dialog>
-
+      
       {/* Dialog Potwierdzenia (bez zmian) */}
       <Dialog open={confirmDialogOpen} onClose={() => handleConfirmDialogClose(false)}>
         <DialogTitle>Confirm Action</DialogTitle>
@@ -395,7 +413,7 @@ function App() {
         </MuiAlert>
       </Snackbar>
 
-      {/* ZMIANA: Wywołanie ChartModal z props 'workload' */}
+      {/* Modal Wykresu (bez zmian) */}
       <ChartModal
         open={Boolean(chartWorkload)}
         onClose={handleCloseChartModal}
