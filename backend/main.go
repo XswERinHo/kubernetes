@@ -683,7 +683,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request, namespace, kind, nam
 	case "1h":
 		fallthrough
 	default:
-		startTime = endTime.Add(-1 * time.Minute)
+		startTime = endTime.Add(-1 * time.Hour)
 		step = time.Minute
 		cacheTTL = shortCacheTTL
 	}
