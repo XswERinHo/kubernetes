@@ -2,11 +2,13 @@ import { useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Typography, Paper, Grid, Box } from '@mui/material';
 import { PieChart } from '@mui/x-charts/PieChart';
-import { useCurrencyFormatter } from '../hooks/useCurrencyFormatter'; // <-- NOWY IMPORT
+import { useCurrencyFormatter } from '../hooks/useCurrencyFormatter'; 
 import { useTranslation } from 'react-i18next';
+import HealthStatus from '../components/HealthStatus'; // <-- NOWY IMPORT
 
 // Komponent pomocniczy dla karty KPI
 function KpiCard({ title, value, color = 'text.primary' }) {
+  // ... (bez zmian)
   return (
     <Paper sx={{ p: 2, height: '100%' }}>
       <Typography variant="body2" color="text.secondary">
@@ -20,6 +22,7 @@ function KpiCard({ title, value, color = 'text.primary' }) {
 }
 
 function extractSavings(recommendationText) {
+  // ... (bez zmian)
   const match = recommendationText.match(/Oszczędność: ([\d.]+)\s*zł/i);
   if (match && match[1]) {
     return parseFloat(match[1]);
@@ -30,9 +33,10 @@ function extractSavings(recommendationText) {
 export default function Dashboard() {
   const { workloads } = useOutletContext();
   const { t } = useTranslation();
-  const formatCurrency = useCurrencyFormatter(); // <-- UŻYWAMY HOOKA
+  const formatCurrency = useCurrencyFormatter(); 
 
   const dashboardStats = useMemo(() => {
+    // ... (bez zmian)
     let totalUsageCost = 0;
     let totalRequestCost = 0;
     let totalSavings = 0;
@@ -79,6 +83,7 @@ export default function Dashboard() {
   return (
     <Box>
       <Grid container spacing={3}>
+        {/* KPI Cards (bez zmian) */}
         <Grid item xs={12} md={3}>
           <KpiCard
             title={t('dashboard.kpi_usage_cost')}
@@ -109,6 +114,7 @@ export default function Dashboard() {
       </Grid>
 
       <Grid container spacing={3} sx={{ mt: 2 }}>
+        {/* Wykres Kołowy (bez zmian) */}
         <Grid item xs={12} md={8}>
           <Paper sx={{ p: 2, height: 400 }}>
             <Typography variant="h6" gutterBottom>
@@ -140,19 +146,29 @@ export default function Dashboard() {
             )}
           </Paper>
         </Grid>
+        
+        {/* --- NOWA SEKCJA --- */}
         <Grid item xs={12} md={4}>
-           <Paper sx={{ p: 2, height: 400, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-            <Typography variant="h6" gutterBottom>{t('dashboard.summary_title')}</Typography>
-            <Box>
-              <Typography variant="h5" component="p" gutterBottom>
-                <strong>{dashboardStats.totalWorkloads}</strong> {t('dashboard.summary_workloads')}
-              </Typography>
-              <Typography variant="h5" component="p">
-                <strong>{dashboardStats.totalNamespaces}</strong> {t('dashboard.summary_namespaces')}
-              </Typography>
-            </Box>
-           </Paper>
+           <Grid container spacing={3}>
+              <Grid item xs={12}>
+                <HealthStatus /> 
+              </Grid>
+              <Grid item xs={12}>
+                <Paper sx={{ p: 2, height: 280, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <Typography variant="h6" gutterBottom>{t('dashboard.summary_title')}</Typography>
+                  <Box>
+                    <Typography variant="h5" component="p" gutterBottom>
+                      <strong>{dashboardStats.totalWorkloads}</strong> {t('dashboard.summary_workloads')}
+                    </Typography>
+                    <Typography variant="h5" component="p">
+                      <strong>{dashboardStats.totalNamespaces}</strong> {t('dashboard.summary_namespaces')}
+                    </Typography>
+                  </Box>
+                </Paper>
+              </Grid>
+           </Grid>
         </Grid>
+        {/* --- KONIEC NOWEJ SEKCJI --- */}
       </Grid>
     </Box>
   );

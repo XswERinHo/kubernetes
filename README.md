@@ -51,3 +51,71 @@ Celem jest stworzenie inteligentnego asystenta, który aktywnie pomaga w optymal
 ---
 
 *(Tutaj można dodać informacje o tym, jak uruchomić projekt, technologiach itp.)*
+
+
+# K8s Resource Manager
+
+Aplikacja webowa (Go + React) do monitorowania, optymalizacji i zarządzania zasobami (CPU, RAM) oraz kosztami w klastrach Kubernetes.
+
+## 🚀 Kluczowe Funkcje (Stan Obecny)
+
+To, co jest już zaimplementowane i działa:
+
+* ✅ **Dashboard FinOps:** Agregacja kosztów zużycia i żądań w skali miesiąca, wizualizacja kosztów per przestrzeń nazw (namespace).
+* ✅ **Wsparcie dla Wielu Klastrów:** Dynamiczne ładowanie wszystkich kontekstów z lokalnego pliku `kubeconfig` i selektor klastrów w UI.
+* ✅ **Zarządzanie Zasobami (Workloads):** Przeglądanie `Deployments`, `StatefulSets`, `DaemonSets` i `CronJobs`. Możliwość ręcznej edycji `requests` i `limits`.
+* ✅ **Zaawansowane Rekomendacje:** Silnik rekomendacji w backendzie, który wykrywa:
+    * Zasoby przewymiarowane (sugerując `downsizing` na bazie 7-dniowego p95).
+    * Zasoby "Zombie" (brak zużycia CPU/RAM).
+    * Historyczne błędy `OOMKilled`.
+* ✅ **Monitoring Systemu:** Panel statusu "Health Check" monitorujący na żywo połączenie z API Kubernetesa i API Prometheusa dla wybranego klastra.
+* ✅ **Wizualizacja Metryk:** Historyczne wykresy zużycia CPU i Pamięci dla każdego zasobu, z widocznymi liniami `request` i `limit`.
+* ✅ **Nowoczesny UI/UX:**
+    * Motyw Ciemny / Jasny (przełączany w ustawieniach).
+    * Pełna internacjonalizacja (i18n) dla języka polskiego (PL) i angielskiego (EN).
+    * Inteligentne formatowanie walut (PLN/USD) w zależności od wybranego języka.
+
+---
+
+## 🎯 Roadmapa Rozwoju (Wizja Produktu)
+
+Celem jest stworzenie inteligentnego asystenta, który aktywnie pomaga w optymalizacji i zarządzaniu klastrami na dużą skalę.
+
+### ➡️ Następne Priorytety (Poziom 2)
+
+Kolejne funkcje planowane do implementacji:
+
+#### 2.1 Role-Based Access Control (RBAC) ⭐⭐
+* **Cel:** Bezpieczeństwo i podział uprawnień.
+* **Backend:** Integracja z JWT/OAuth2. Endpointy `/api/auth/login`, `/api/auth/logout`. Middleware sprawdzające uprawnienia. Logi audytowe.
+* **Frontend:** Ekran logowania. Warunkowe renderowanie UI na bazie ról:
+    * **Admin:** Pełna kontrola.
+    * **Editor (Moderator):** Może aplikować rekomendacje, ręczne edycje wymagają zatwierdzenia.
+    * **Viewer:** Dostęp tylko do odczytu.
+
+#### 2.2 Widok Węzłów (Nodes View) ⭐⭐
+* **Cel:** Monitoring węzłów klastra i planowanie pojemności.
+* **Backend:** Endpoint `/api/nodes` zwracający listę węzłów, ich metryki CPU/Memory/Disk, status, alokację podów, etykiety i tainty.
+* **Frontend:** Dedykowana zakładka "Nodes". Tabela/Grid z węzłami (Capacity vs Allocatable vs Used). Drill-down do listy podów na węźle.
+
+#### 2.3 Alokacja Kosztów (Cost Allocation) ⭐⭐
+* **Cel:** Wdrożenie zasad FinOps – przypisywanie kosztów do zespołów/projektów.
+* **Backend:** Endpoint `/api/costs/allocation` grupujący koszty po etykietach (`team`, `project`). Integracja z OpenCost/Kubecost API. Eksport raportów CSV.
+* **Frontend:** Zakładka "Cost Allocation". Wykresy kosztów per team/project. Śledzenie budżetów.
+
+#### 2.4 Alerty i Powiadomienia ⭐⭐
+* **Cel:** Proaktywne powiadomienia o problemach.
+* **Backend:** Konfiguracja reguł alertów (np. wysokie koszty, OOMKilled). Integracja z Slack/Email/Webhooks. Endpoint `/api/alerts` z historią.
+* **Frontend:** Zakładka "Alerts". Konfiguracja kanałów powiadomień w Ustawieniach. Wizualne alerty na Dashboard.
+
+---
+
+## 🛠️ Stos Technologiczny
+
+* **Backend:** **Go (Golang)**
+    * Biblioteki: `k8s.io/client-go`, `prometheus/client_golang`, `prometheus-operator/pkg/client`
+* **Frontend:** **React** (uruchamiany przez Vite)
+    * Biblioteki: `Material-UI (MUI)`, `React Router`, `i18next`, `@mui/x-charts`
+* **Monitoring:** **Prometheus** (jako źródło danych metryk)
+
+---

@@ -4,6 +4,13 @@
     "workloads": "Zasoby",
     "settings": "Ustawienia"
   },
+  "app_bar": {
+    "loading_clusters": "Ładowanie...",
+    "no_clusters_found": "Nie znaleziono klastrów"
+  },
+  "main_layout": {
+    "error_title": "Błąd połączenia z backendem"
+  },
   "settings": {
     "title": "Ustawienia",
     "appearance": "Wygląd",
@@ -22,7 +29,12 @@
     "summary_title": "Podsumowanie Klastra",
     "summary_workloads": "Zasoby",
     "summary_namespaces": "Przestrzenie Nazw",
-    "no_cost_data": "Brak danych o kosztach do wyświetlenia."
+    "no_cost_data": "Brak danych o kosztach do wyświetlenia.",
+    "health_title": "Status Systemu",
+    "health_kubernetes": "Kubernetes API",
+    "health_prometheus": "Prometheus API",
+    "health_ok": "Połączono",
+    "health_error": "Błąd Połączenia"
   },
   "workloads": {
     "search_label": "Szukaj po nazwie...",

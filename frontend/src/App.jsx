@@ -7,6 +7,7 @@ import Dashboard from './views/Dashboard';
 import Workloads from './views/Workloads';
 import Settings from './views/Settings';
 import { ThemeModeContext } from './context/ThemeContext';
+import { ClusterProvider } from './context/ClusterContext'; // <-- NOWY IMPORT
 
 function App() {
   const [mode, setMode] = useState('dark');
@@ -37,17 +38,21 @@ function App() {
     <ThemeModeContext.Provider value={themeModeApi}>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <Routes>
-          <Route path="/" element={<MainLayout />}>
-            <Route path="dashboard" element={<Dashboard />} />
-            <Route path="workloads" element={<Workloads />} />
-            
-            {/* Usunęliśmy prop 'currentMode', Settings pobierze go z kontekstu */}
-            <Route path="settings" element={<Settings />} />
-            
-            <Route index element={<Navigate to="/dashboard" replace />} />
-          </Route>
-        </Routes>
+        {/* --- NOWY PROVIDER --- */}
+        <ClusterProvider>
+          <Routes>
+            <Route path="/" element={<MainLayout />}>
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="workloads" element={<Workloads />} />
+              
+              {/* Usunęliśmy prop 'currentMode', Settings pobierze go z kontekstu */}
+              <Route path="settings" element={<Settings />} />
+              
+              <Route index element={<Navigate to="/dashboard" replace />} />
+            </Route>
+          </Routes>
+        </ClusterProvider>
+        {/* --- KONIEC ZMIANY --- */}
       </ThemeProvider>
     </ThemeModeContext.Provider>
   );

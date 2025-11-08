@@ -6,6 +6,7 @@ import {
 import { LineChart, axisClasses, ChartsReferenceLine } from '@mui/x-charts';
 import { formatBytes, parseCpu, parseMemory } from '../utils/formatters';
 import { useTranslation } from 'react-i18next';
+import { useCluster } from '../context/ClusterContext'; // <-- NOWY IMPORT
 
 // Style (bez zmian)
 const chartModalStyle = {
@@ -15,52 +16,40 @@ const chartModalStyle = {
 };
 const spinnerHeight = 400;
 
-// --- NOWA, MĄDRZEJSZA FUNKCJA SKALOWANIA OSI Y ---
+// Funkcja skalowania osi (bez zmian)
 const getAxisBounds = (dataPoints) => {
+  // ... (bez zmian)
   const values = dataPoints.map(d => d.y);
-
-  // Jeśli nie ma danych, zwróć domyślną skalę
   if (values.length === 0) {
     return { yMin: 0, yMax: 100 };
   }
-
   let min = Math.min(...values);
   let max = Math.max(...values);
-
-  // Jeśli linia jest idealnie płaska (np. stałe zużycie 50m)
   if (max === min) {
-    // Ustaw max na 120% wartości, a min na 80%
-    max = max * 1.2 + 10; // +20% i dodaj 10 jednostek (np. 10m lub 10MB)
+    max = max * 1.2 + 10;
     min = min * 0.8 - 10;
   } else {
-    // Jeśli są fluktuacje, dodaj 15% "oddechu" (paddingu)
     const padding = (max - min) * 0.15;
     max = max + padding;
     min = min - padding;
   }
-
-  // Zawsze próbuj zacząć oś od 0, chyba że dane są ujemne
   if (min > 0) {
     min = 0;
   }
-
-  // Upewnij się, że jest jakaś minimalna różnica między min i max
   if (max > 0 && max - min < max * 0.1) {
     max = max * 1.1;
   }
-  
-  // Na wypadek gdyby max było 0
   if (max === 0 && min === 0) {
-    max = 10; // Ustaw minimalną wysokość osi na 10
+    max = 10;
   }
-
   return { yMin: min, yMax: max };
 };
-// --- KONIEC NOWEJ FUNKCJI ---
 
 
 export default function ChartModal({ workload, open, onClose }) {
   const { t, i18n } = useTranslation(); 
+  const { selectedCluster } = useCluster(); // <-- NOWY HOOK
+  
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState({ cpuUsage: [], memoryUsage: [] });
@@ -78,28 +67,37 @@ export default function ChartModal({ workload, open, onClose }) {
     }
   };
 
-  // useEffect do pobierania danych (bez zmian)
+  // --- ZMIANA: useEffect pobiera dane z nowego URL ---
   useEffect(() => {
-    if (open && workload) {
-      setLoading(true);
-      setError(null);
-      fetch(`/api/workloads/${workload.namespace}/${workload.kind}/${workload.name}/metrics?range=${timeRange}`)
-        .then(response => {
-          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-          return response.json();
-        })
-        .then(historyData => {
-          const cpuUsage = (historyData.cpuUsage || []).map(d => ({ x: new Date(d.timestamp), y: d.value }));
-          const memoryUsage = (historyData.memoryUsage || []).map(d => ({ x: new Date(d.timestamp), y: d.value }));
-          setData({ cpuUsage, memoryUsage });
-        })
-        .catch(err => {
-          console.error('Error fetching metrics:', err);
-          setError(`Failed to load metrics: ${err.message}`);
-        })
-        .finally(() => setLoading(false));
+    // Nie rób nic, jeśli modal nie jest otwarty, nie ma workloada lub klastra
+    if (!open || !workload || !selectedCluster) {
+      return;
     }
-  }, [open, workload, timeRange]);
+
+    setLoading(true);
+    setError(null);
+    
+    // Budujemy nowy URL
+    const url = `/api/clusters/${selectedCluster}/workloads/${workload.namespace}/${workload.kind}/${workload.name}/metrics?range=${timeRange}`;
+
+    fetch(url) // <-- Używamy nowego URL
+      .then(response => {
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        return response.json();
+      })
+      .then(historyData => {
+        const cpuUsage = (historyData.cpuUsage || []).map(d => ({ x: new Date(d.timestamp), y: d.value }));
+        const memoryUsage = (historyData.memoryUsage || []).map(d => ({ x: new Date(d.timestamp), y: d.value }));
+        setData({ cpuUsage, memoryUsage });
+      })
+      .catch(err => {
+        console.error('Error fetching metrics:', err);
+        setError(`Failed to load metrics: ${err.message}`);
+      })
+      .finally(() => setLoading(false));
+    
+    // --- ZMIANA: Dodajemy `selectedCluster` do zależności ---
+  }, [open, workload, timeRange, selectedCluster]);
 
   // useEffect do resetowania stanu (bez zmian)
   useEffect(() => {
@@ -112,6 +110,7 @@ export default function ChartModal({ workload, open, onClose }) {
   }, [open]);
 
   // Formattery (bez zmian)
+  // ...
   const memValueFormatter = (value) => formatBytes(value, 0);
   const cpuValueFormatter = (value) => `${value.toFixed(0)}m`;
   const timeFormatter = (date) => {
@@ -122,8 +121,7 @@ export default function ChartModal({ workload, open, onClose }) {
     return date.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' });
   };
 
-  // --- ZMIANA: Wywołujemy nową logikę skalowania ---
-  // Przekazujemy req/lim tylko na wypadek, gdyby nie było danych
+  // Logika skalowania (bez zmian)
   const cpuBounds = getAxisBounds(data.cpuUsage, cpuReq, cpuLim);
   const memBounds = getAxisBounds(data.memoryUsage, memReq, memLim);
 
@@ -173,7 +171,6 @@ export default function ChartModal({ workload, open, onClose }) {
                     dataset={data.cpuUsage}
                     series={[{ dataKey: 'y', label: 'CPU (mCores)', valueFormatter: cpuValueFormatter, showMark: false }]}
                     xAxis={[{ dataKey: 'x', scaleType: 'time', valueFormatter: timeFormatter }]}
-                    // --- ZMIANA: Używamy nowych, dynamicznych granic ---
                     yAxis={[{ valueFormatter: cpuValueFormatter, min: cpuBounds.yMin, max: cpuBounds.yMax }]}
                     sx={{ [`.${axisClasses.left} .${axisClasses.label}`]: { transform: 'translate(-10px, 0)' } }}
                     margin={{ left: 60 }}
@@ -193,7 +190,6 @@ export default function ChartModal({ workload, open, onClose }) {
                     dataset={data.memoryUsage}
                     series={[{ dataKey: 'y', label: 'Memory', valueFormatter: memValueFormatter, showMark: false }]}
                     xAxis={[{ dataKey: 'x', scaleType: 'time', valueFormatter: timeFormatter }]}
-                    // --- ZMIANA: Używamy nowych, dynamicznych granic ---
                     yAxis={[{ valueFormatter: memValueFormatter, min: memBounds.yMin, max: memBounds.yMax }]}
                     sx={{ [`.${axisClasses.left} .${axisClasses.label}`]: { transform: 'translate(-10px, 0)' } }}
                     margin={{ left: 70 }}

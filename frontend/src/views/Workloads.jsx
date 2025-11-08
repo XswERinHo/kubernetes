@@ -16,15 +16,16 @@ import { useTranslation } from 'react-i18next';
 
 import ChartModal from '../components/ChartModal';
 import WorkloadCard from '../components/WorkloadCard';
-import { useCurrencyFormatter } from '../hooks/useCurrencyFormatter'; // <-- NOWY IMPORT
+import { useCurrencyFormatter } from '../hooks/useCurrencyFormatter'; 
 import { parseActionableRecommendation } from '../utils/recommendations';
 
 const modalStyle = { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 600, bgcolor: 'background.paper', border: '2px solid #000', boxShadow: 24, p: 4, color: 'white', backgroundColor: '#424242' };
 
 export default function Workloads() {
-  const { workloads, fetchData } = useOutletContext();
+  // --- ZMIANA: Pobieramy `selectedCluster` z kontekstu MainLayout ---
+  const { workloads, fetchData, selectedCluster } = useOutletContext();
   const { t } = useTranslation();
-  const formatCurrency = useCurrencyFormatter(); // <-- UŻYWAMY HOOKA
+  const formatCurrency = useCurrencyFormatter(); 
   
   // Stany dla Modali
   const [selectedWorkload, setSelectedWorkload] = useState(null);
@@ -85,10 +86,14 @@ export default function Workloads() {
   };
   const handleSnackbarClose = () => { setSnackbarOpen(false); };
 
-  // Funkcja API (bez zmian)
+  // --- ZMIANA: Funkcja API musi teraz znać `selectedCluster` ---
   const applyResourceUpdate = (workload, body) => {
     const { namespace, name, kind } = workload;
-    fetch(`/api/workloads/${namespace}/${kind}/${name}/resources`, {
+    
+    // Budujemy nowy URL
+    const url = `/api/clusters/${selectedCluster}/workloads/${namespace}/${kind}/${name}/resources`;
+    
+    fetch(url, { // <-- Używamy nowego URL
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -118,6 +123,7 @@ export default function Workloads() {
   };
 
   // Logika filtrowania i grupowania (bez zmian)
+  // ... (cała reszta bez zmian)
   const namespaces = useMemo(() => {
     return ['all', ...new Set(workloads.map(w => w.namespace))];
   }, [workloads]);
@@ -237,7 +243,7 @@ export default function Workloads() {
         ))}
       </Container>
 
-      {/* --- MODALE --- */}
+      {/* --- MODALE (bez zmian w logice renderowania) --- */}
       
       <Modal open={Boolean(selectedWorkload)} onClose={handleCloseDetails}>
         <Box sx={modalStyle}>

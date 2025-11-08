@@ -4,6 +4,13 @@
     "workloads": "Workloads",
     "settings": "Settings"
   },
+  "app_bar": {
+    "loading_clusters": "Loading...",
+    "no_clusters_found": "No clusters found"
+  },
+  "main_layout": {
+    "error_title": "Failed to connect to backend"
+  },
   "settings": {
     "title": "Settings",
     "appearance": "Appearance",
@@ -22,7 +29,12 @@
     "summary_title": "Cluster Summary",
     "summary_workloads": "Workloads",
     "summary_namespaces": "Namespaces",
-    "no_cost_data": "No cost data to display."
+    "no_cost_data": "No cost data to display.",
+    "health_title": "System Health",
+    "health_kubernetes": "Kubernetes API",
+    "health_prometheus": "Prometheus API",
+    "health_ok": "Connected",
+    "health_error": "Connection Error"
   },
   "workloads": {
     "search_label": "Search by name...",

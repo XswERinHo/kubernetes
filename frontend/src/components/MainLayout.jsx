@@ -1,25 +1,35 @@
-// Pełna zawartość pliku:
 // frontend/src/components/MainLayout.jsx
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react'; // <-- IMPORT useCallback
 import { Outlet } from 'react-router-dom';
 import { Box, Drawer, AppBar, Toolbar, Typography, CssBaseline, CircularProgress, Alert } from '@mui/material';
 import NavList from './NavList';
+import { useTranslation } from 'react-i18next';
+import { useCluster } from '../context/ClusterContext'; 
+import ClusterSelector from './ClusterSelector'; 
 
 const drawerWidth = 240;
 
 export default function MainLayout() {
-  // --- POCZĄTEK NOWEJ LOGIKI ---
-  // Przenosimy stany z Workloads.jsx do layoutu nadrzędnego
+  const { t } = useTranslation();
+  
+  const { selectedCluster, error: clusterError } = useCluster();
+
   const [workloads, setWorkloads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Przenosimy funkcję pobierania danych
-  const fetchData = () => {
+  // --- ZMIANA: Opakowujemy fetchData w useCallback ---
+  const fetchData = useCallback(() => {
+    if (!selectedCluster) {
+      setLoading(false); // Upewnij się, że ładowanie jest wyłączone, jeśli nie ma klastra
+      return;
+    }
+
     setLoading(true);
     setError(null);
-    fetch('/api/workloads')
+    
+    fetch(`/api/clusters/${selectedCluster}/workloads`)
       .then(response => {
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         return response.json();
@@ -33,13 +43,22 @@ export default function MainLayout() {
         setError(`Failed to load workloads: ${error.message}`);
       })
       .finally(() => setLoading(false));
-  };
+  }, [selectedCluster]); // <-- Deklarujemy zależność od selectedCluster
   
-  // Pobieramy dane przy pierwszym załadowaniu layoutu
+  // --- ZMIANA: Dodajemy fetchData do tablicy zależności ---
   useEffect(() => {
-    fetchData();
-  }, []);
-  // --- KONIEC NOWEJ LOGIKI ---
+    setWorkloads([]);
+    setError(null);
+    
+    if (selectedCluster) {
+      fetchData();
+    } else if (clusterError) {
+      setError(clusterError);
+      setLoading(false);
+    }
+  }, [selectedCluster, clusterError, fetchData]); // <-- DODANO fetchData
+  // --- KONIEC ZMIAN ---
+
 
   // Funkcja pomocnicza do renderowania treści
   const renderContent = () => {
@@ -55,16 +74,14 @@ export default function MainLayout() {
       return (
         <Box sx={{ p: 3 }}>
           <Alert severity="error" variant="filled">
-            <Typography variant="h6">Failed to connect to backend</Typography>
-            <pre>{error.message}</pre>
+            <Typography variant="h6">{t('main_layout.error_title')}</Typography>
+            <pre>{error}</pre>
           </Alert>
         </Box>
       );
     }
 
-    // Jeśli dane są gotowe, przekazujemy je do pod-widoków (Dashboard/Workloads)
-    // Używamy "Outlet context" do przekazania danych i funkcji odświeżania
-    return <Outlet context={{ workloads, fetchData }} />;
+    return <Outlet context={{ workloads, fetchData, selectedCluster }} />;
   };
 
   return (
@@ -75,9 +92,12 @@ export default function MainLayout() {
         sx={{ width: `calc(100% - ${drawerWidth}px)`, ml: `${drawerWidth}px` }}
       >
         <Toolbar>
-          <Typography variant="h6" noWrap component="div">
+          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
             K8s Resource Manager
           </Typography>
+          
+          <ClusterSelector />
+          
         </Toolbar>
       </AppBar>
       
@@ -103,7 +123,6 @@ export default function MainLayout() {
       >
         <Toolbar />
         
-        {/* Renderujemy treść (Spinner, Błąd lub Outlet) */}
         {renderContent()}
       </Box>
     </Box>
