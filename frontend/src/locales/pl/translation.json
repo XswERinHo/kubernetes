@@ -6,10 +6,17 @@
   },
   "app_bar": {
     "loading_clusters": "Ładowanie...",
-    "no_clusters_found": "Nie znaleziono klastrów"
+    "no_clusters_found": "Nie znaleziono klastrów",
+    "logout_btn": "Wyloguj"
   },
   "main_layout": {
     "error_title": "Błąd połączenia z backendem"
+  },
+  "login": {
+    "title": "Zaloguj się",
+    "username": "Nazwa użytkownika",
+    "password": "Hasło",
+    "submit_btn": "Zaloguj"
   },
   "settings": {
     "title": "Ustawienia",

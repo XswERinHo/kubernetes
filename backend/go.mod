@@ -15,6 +15,8 @@ require (
 // --- KONIEC POPRAWKI ---
 )
 
+require github.com/golang-jwt/jwt/v5 v5.2.2
+
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect

@@ -1,3 +1,5 @@
+// frontend/src/views/Workloads.jsx
+
 import { useState, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import {
@@ -18,16 +20,16 @@ import ChartModal from '../components/ChartModal';
 import WorkloadCard from '../components/WorkloadCard';
 import { useCurrencyFormatter } from '../hooks/useCurrencyFormatter'; 
 import { parseActionableRecommendation } from '../utils/recommendations';
+import { useAuth } from '../context/AuthContext';
 
 const modalStyle = { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 600, bgcolor: 'background.paper', border: '2px solid #000', boxShadow: 24, p: 4, color: 'white', backgroundColor: '#424242' };
 
 export default function Workloads() {
-  // --- ZMIANA: Pobieramy `selectedCluster` z kontekstu MainLayout ---
-  const { workloads, fetchData, selectedCluster } = useOutletContext();
+  const { workloads, fetchData, selectedCluster, userRole } = useOutletContext();
+  const { getAuthHeader } = useAuth();
   const { t } = useTranslation();
   const formatCurrency = useCurrencyFormatter(); 
   
-  // Stany dla Modali
   const [selectedWorkload, setSelectedWorkload] = useState(null);
   const [editWorkload, setEditWorkload] = useState(null);
   const [chartWorkload, setChartWorkload] = useState(null);
@@ -38,14 +40,18 @@ export default function Workloads() {
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState('success');
 
-  // Stany dla filtrów
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedNamespace, setSelectedNamespace] = useState('all');
 
-  // Handlery Modali (bez zmian)
+  const isAdmin = userRole === 'Admin';
+  const canApplyRecommendation = userRole === 'Admin' || userRole === 'Editor';
+  const canSeeRecommendations = userRole === 'Admin' || userRole === 'Editor';
+
+  // Handlery Modali
   const handleShowDetails = (workload) => setSelectedWorkload(workload);
   const handleCloseDetails = () => setSelectedWorkload(null);
   const handleOpenEditModal = (workload) => {
+    if (!isAdmin) return; 
     setFormData({
       cpuRequests: workload.cpuRequests === "0" ? "" : workload.cpuRequests,
       cpuLimits: workload.cpuLimits === "0" ? "" : workload.cpuLimits,
@@ -54,7 +60,11 @@ export default function Workloads() {
     });
     setEditWorkload(workload);
   };
+  
+  // --- POPRAWKA: TA LINIA ZOSTAŁA PRZYWRÓCONA ---
   const handleCloseEditModal = () => setEditWorkload(null);
+  // ------------------------------------------
+
   const handleOpenChartModal = (workload) => setChartWorkload(workload);
   const handleCloseChartModal = () => setChartWorkload(null);
   const handleFormChange = (event) => { const { name, value } = event.target; setFormData(prev => ({ ...prev, [name]: value })); };
@@ -86,19 +96,26 @@ export default function Workloads() {
   };
   const handleSnackbarClose = () => { setSnackbarOpen(false); };
 
-  // --- ZMIANA: Funkcja API musi teraz znać `selectedCluster` ---
   const applyResourceUpdate = (workload, body) => {
     const { namespace, name, kind } = workload;
     
-    // Budujemy nowy URL
     const url = `/api/clusters/${selectedCluster}/workloads/${namespace}/${kind}/${name}/resources`;
     
-    fetch(url, { // <-- Używamy nowego URL
+    fetch(url, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        ...getAuthHeader()
+      },
       body: JSON.stringify(body),
     })
     .then(response => {
+      if (response.status === 401) {
+         throw new Error('Sesja wygasła');
+      }
+      if (response.status === 403) { 
+         throw new Error('Brak uprawnień (Wymagana rola Admin lub Editor)');
+      }
       if (!response.ok) {
         return response.text().then(text => {
           throw new Error(text || `HTTP error! status: ${response.status}`)
@@ -122,8 +139,6 @@ export default function Workloads() {
     });
   };
 
-  // Logika filtrowania i grupowania (bez zmian)
-  // ... (cała reszta bez zmian)
   const namespaces = useMemo(() => {
     return ['all', ...new Set(workloads.map(w => w.namespace))];
   }, [workloads]);
@@ -148,17 +163,18 @@ export default function Workloads() {
       acc[namespace].workloads.push(workload);
       acc[namespace].totalRequestCost += workload.requestCost;
       acc[namespace].totalUsageCost += workload.usageCost;
-      acc[namespace].totalRecommendations += workload.recommendations.length;
+      if (canSeeRecommendations) {
+        acc[namespace].totalRecommendations += workload.recommendations.length;
+      }
       return acc;
     }, {});
-  }, [filteredWorkloads]);
+  }, [filteredWorkloads, canSeeRecommendations]);
 
 
   return (
     <>
       <Container maxWidth="xl" sx={{ mt: 0, mb: 4 }}>
         
-        {/* Pasek Filtrów */}
         <Paper sx={{ p: 2, mb: 3, display: 'flex', gap: 2, alignItems: 'center' }}>
           <Box sx={{ display: 'flex', alignItems: 'flex-end', flexGrow: 1 }}>
             <SearchIcon sx={{ color: 'action.active', mr: 1, my: 0.5 }} />
@@ -183,7 +199,6 @@ export default function Workloads() {
           </FormControl>
         </Paper>
 
-        {/* Lista Akordeonów */}
         {Object.entries(groupedWorkloads).length === 0 && (
           <Paper sx={{p: 3, textAlign: 'center'}}>
             <Typography>{t('workloads.no_workloads_found')}</Typography>
@@ -205,12 +220,14 @@ export default function Workloads() {
               <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center', pr: 2 }}>
                 <Typography variant="h6">{namespace}</Typography>
                 <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                  <Chip
-                    icon={<InfoIcon />}
-                    label={t('workloads.recs_chip', { count: data.totalRecommendations })}
-                    color={data.totalRecommendations > 0 ? "warning" : "default"}
-                    size="small"
-                  />
+                  {canSeeRecommendations && (
+                    <Chip
+                      icon={<InfoIcon />}
+                      label={t('workloads.recs_chip', { count: data.totalRecommendations })}
+                      color={data.totalRecommendations > 0 ? "warning" : "default"}
+                      size="small"
+                    />
+                  )}
                   <Typography variant="body2">
                     {t('workloads.usage_cost')} <strong>{formatCurrency(data.totalUsageCost)}</strong>
                   </Typography>
@@ -235,6 +252,8 @@ export default function Workloads() {
                     onOpenChart={handleOpenChartModal}
                     onOpenEdit={handleOpenEditModal}
                     onOpenDetails={handleShowDetails}
+                    userRole={userRole}
+                    canSeeRecommendations={canSeeRecommendations}
                   />
                 ))}
               </Box>
@@ -243,22 +262,35 @@ export default function Workloads() {
         ))}
       </Container>
 
-      {/* --- MODALE (bez zmian w logice renderowania) --- */}
+      {/* --- MODALE --- */}
       
       <Modal open={Boolean(selectedWorkload)} onClose={handleCloseDetails}>
         <Box sx={modalStyle}>
           <Typography variant="h6" component="h2"> Recommendations for {selectedWorkload?.namespace}/{selectedWorkload?.name} </Typography>
-          <ul style={{ marginTop: '16px', paddingLeft: '20px', listStyle: 'none' }}>
-            {selectedWorkload?.recommendations.map((rec, index) => {
-              const parsedRec = parseActionableRecommendation(rec);
-              return (
-                <li key={index} style={{ marginBottom: '15px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>{parsedRec.text}</span>
-                  {parsedRec.type === 'apply' && ( <Button variant="contained" color="primary" size="small" startIcon={<ApplyChangesIcon />} onClick={() => handleApplyClick(selectedWorkload, parsedRec)} sx={{ ml: 2, flexShrink: 0 }}> Apply </Button> )}
-                </li>
-              );
-            })}
-          </ul>
+          {canSeeRecommendations && (
+            <ul style={{ marginTop: '16px', paddingLeft: '20px', listStyle: 'none' }}>
+              {selectedWorkload?.recommendations.map((rec, index) => {
+                const parsedRec = parseActionableRecommendation(rec);
+                return (
+                  <li key={index} style={{ marginBottom: '15px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>{parsedRec.text}</span>
+                    {canApplyRecommendation && parsedRec.type === 'apply' && ( 
+                      <Button 
+                        variant="contained" 
+                        color="primary" 
+                        size="small" 
+                        startIcon={<ApplyChangesIcon />} 
+                        onClick={() => handleApplyClick(selectedWorkload, parsedRec)} 
+                        sx={{ ml: 2, flexShrink: 0 }}
+                      > 
+                        Apply 
+                      </Button> 
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
           <Button onClick={handleCloseDetails} variant="outlined" sx={{ mt: 2 }}> Close </Button>
         </Box>
       </Modal>

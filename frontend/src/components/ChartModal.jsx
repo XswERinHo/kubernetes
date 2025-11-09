@@ -1,14 +1,18 @@
+// frontend/src/components/ChartModal.jsx
+
 import { useState, useEffect } from 'react';
 import {
   Modal, Box, Button, Typography, ToggleButtonGroup, ToggleButton,
   CircularProgress, Alert as MuiAlert
 } from '@mui/material';
+// --- POPRAWKA: Brakujące importy ---
 import { LineChart, axisClasses, ChartsReferenceLine } from '@mui/x-charts';
 import { formatBytes, parseCpu, parseMemory } from '../utils/formatters';
+// --- KONIEC POPRAWKI ---
 import { useTranslation } from 'react-i18next';
-import { useCluster } from '../context/ClusterContext'; // <-- NOWY IMPORT
+import { useCluster } from '../context/ClusterContext'; 
+import { useAuth } from '../context/AuthContext'; 
 
-// Style (bez zmian)
 const chartModalStyle = {
   position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
   width: '80%', maxWidth: 900, bgcolor: 'background.paper', border: '2px solid #000',
@@ -16,9 +20,7 @@ const chartModalStyle = {
 };
 const spinnerHeight = 400;
 
-// Funkcja skalowania osi (bez zmian)
 const getAxisBounds = (dataPoints) => {
-  // ... (bez zmian)
   const values = dataPoints.map(d => d.y);
   if (values.length === 0) {
     return { yMin: 0, yMax: 100 };
@@ -48,14 +50,14 @@ const getAxisBounds = (dataPoints) => {
 
 export default function ChartModal({ workload, open, onClose }) {
   const { t, i18n } = useTranslation(); 
-  const { selectedCluster } = useCluster(); // <-- NOWY HOOK
-  
+  const { selectedCluster } = useCluster(); 
+  const { getAuthHeader } = useAuth(); 
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState({ cpuUsage: [], memoryUsage: [] });
   const [timeRange, setTimeRange] = useState('1h');
 
-  // Parsowanie req/lim (bez zmian)
   const cpuReq = parseCpu(workload?.cpuRequests);
   const cpuLim = parseCpu(workload?.cpuLimits);
   const memReq = parseMemory(workload?.memoryRequests);
@@ -67,9 +69,7 @@ export default function ChartModal({ workload, open, onClose }) {
     }
   };
 
-  // --- ZMIANA: useEffect pobiera dane z nowego URL ---
   useEffect(() => {
-    // Nie rób nic, jeśli modal nie jest otwarty, nie ma workloada lub klastra
     if (!open || !workload || !selectedCluster) {
       return;
     }
@@ -77,10 +77,11 @@ export default function ChartModal({ workload, open, onClose }) {
     setLoading(true);
     setError(null);
     
-    // Budujemy nowy URL
     const url = `/api/clusters/${selectedCluster}/workloads/${workload.namespace}/${workload.kind}/${workload.name}/metrics?range=${timeRange}`;
 
-    fetch(url) // <-- Używamy nowego URL
+    fetch(url, {
+      headers: getAuthHeader()
+    }) 
       .then(response => {
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         return response.json();
@@ -96,10 +97,8 @@ export default function ChartModal({ workload, open, onClose }) {
       })
       .finally(() => setLoading(false));
     
-    // --- ZMIANA: Dodajemy `selectedCluster` do zależności ---
-  }, [open, workload, timeRange, selectedCluster]);
+  }, [open, workload, timeRange, selectedCluster, getAuthHeader]); 
 
-  // useEffect do resetowania stanu (bez zmian)
   useEffect(() => {
     if (!open) {
       setLoading(true);
@@ -109,8 +108,6 @@ export default function ChartModal({ workload, open, onClose }) {
     }
   }, [open]);
 
-  // Formattery (bez zmian)
-  // ...
   const memValueFormatter = (value) => formatBytes(value, 0);
   const cpuValueFormatter = (value) => `${value.toFixed(0)}m`;
   const timeFormatter = (date) => {
@@ -121,7 +118,6 @@ export default function ChartModal({ workload, open, onClose }) {
     return date.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Logika skalowania (bez zmian)
   const cpuBounds = getAxisBounds(data.cpuUsage, cpuReq, cpuLim);
   const memBounds = getAxisBounds(data.memoryUsage, memReq, memLim);
 
@@ -129,7 +125,6 @@ export default function ChartModal({ workload, open, onClose }) {
     <Modal open={open} onClose={onClose}>
       <Box sx={chartModalStyle}>
         
-        {/* Header (bez zmian) */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexShrink: 0 }}>
           <Typography variant="h6" component="h2">
             {t('chart_modal.title', { namespace: workload?.namespace, name: workload?.name })}
@@ -148,7 +143,6 @@ export default function ChartModal({ workload, open, onClose }) {
           </ToggleButtonGroup>
         </Box>
         
-        {/* Content (bez zmian) */}
         <Box sx={{ flexGrow: 1, overflowY: 'auto', mt: 3, pr: 2 }}>
           {loading && (
             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: spinnerHeight }}>
@@ -203,7 +197,6 @@ export default function ChartModal({ workload, open, onClose }) {
           )}
         </Box>
 
-        {/* Footer (bez zmian) */}
         <Button onClick={onClose} variant="outlined" sx={{ mt: 2, flexShrink: 0 }}>
           {t('chart_modal.close_btn')}
         </Button>

@@ -1,23 +1,35 @@
 // frontend/src/context/ClusterContext.jsx
 
 import { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import { useAuth } from './AuthContext'; // <-- NOWY IMPORT
 
-// Tworzymy kontekst
 const ClusterContext = createContext(null);
 
-/**
- * Provider, który pobiera listę klastrów i zarządza stanem
- */
 export function ClusterProvider({ children }) {
+  const { isAuthenticated, getAuthHeader } = useAuth(); // <-- POBIERAMY STAN I FUNKCJĘ z AuthContext
+  
   const [clusters, setClusters] = useState([]);
   const [selectedCluster, setSelectedCluster] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Przy pierwszym załadowaniu pobieramy listę klastrów
   useEffect(() => {
-    fetch('/api/clusters')
+    // --- ZMIANA: Nie rób nic, jeśli nie jesteśmy zalogowani ---
+    if (!isAuthenticated) {
+      setLoading(false);
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+
+    fetch('/api/clusters', {
+      headers: getAuthHeader() // <-- UŻYWAMY NAGŁÓWKA AUTORYZACJI
+    })
       .then(res => {
+        if (res.status === 401) {
+          throw new Error('Unauthorized: Token may be invalid. Please log in again.');
+        }
         if (!res.ok) {
           throw new Error('Failed to fetch cluster list');
         }
@@ -25,7 +37,6 @@ export function ClusterProvider({ children }) {
       })
       .then((clusterNames) => {
         setClusters(clusterNames || []);
-        // Jeśli mamy klastry, wybierz pierwszy z listy jako domyślny
         if (clusterNames && clusterNames.length > 0) {
           setSelectedCluster(clusterNames[0]);
         } else {
@@ -39,13 +50,12 @@ export function ClusterProvider({ children }) {
       .finally(() => {
         setLoading(false);
       });
-  }, []); // Pusta tablica oznacza "uruchom tylko raz"
+  }, [isAuthenticated, getAuthHeader]); // <-- ZALEŻNOŚĆ OD STANU LOGOWANIA
 
-  // Tworzymy wartość kontekstu, którą przekażemy "w dół"
   const value = useMemo(() => ({
     clusters,
     selectedCluster,
-    setSelectedCluster, // Funkcja do zmiany klastra
+    setSelectedCluster,
     loading,
     error
   }), [clusters, selectedCluster, loading, error]);
@@ -57,11 +67,8 @@ export function ClusterProvider({ children }) {
   );
 }
 
-/**
- * Hook pomocniczy do łatwego używania kontekstu
- * @returns {{clusters: string[], selectedCluster: string, setSelectedCluster: (cluster: string) => void, loading: boolean, error: string}}
- */
 export const useCluster = () => {
+  // ... (bez zmian)
   const context = useContext(ClusterContext);
   if (!context) {
     throw new Error('useCluster must be used within a ClusterProvider');

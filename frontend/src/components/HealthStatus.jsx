@@ -1,18 +1,20 @@
 // frontend/src/components/HealthStatus.jsx
 
-import { useState, useEffect, useCallback } from 'react'; // <-- IMPORT useCallback
+import { useState, useEffect, useCallback } from 'react';
 import { Paper, Typography, Box, Chip, Tooltip, CircularProgress } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import { useTranslation } from 'react-i18next';
-import { useCluster } from '../context/ClusterContext'; 
+import { useCluster } from '../context/ClusterContext';
+import { useAuth } from '../context/AuthContext';
 
+// --- POPRAWKA: Brakujące stałe ---
 const STATUS_OK = 'ok';
 const STATUS_ERROR = 'error';
 const REFRESH_INTERVAL = 30000; // 30 sekund
+// --- KONIEC POPRAWKI ---
 
 function StatusChip({ status, label, errorMsg }) {
-  // ... (bez zmian)
   const { t } = useTranslation();
   const isOk = status === STATUS_OK;
   const color = isOk ? 'success' : 'error';
@@ -38,13 +40,15 @@ export default function HealthStatus() {
   const [loading, setLoading] = useState(true);
   
   const { selectedCluster } = useCluster();
+  const { getAuthHeader } = useAuth(); 
 
-  // --- ZMIANA: Opakowujemy fetchHealth w useCallback ---
   const fetchHealth = useCallback(() => {
     if (!selectedCluster) return;
 
     setLoading(true);
-    fetch(`/api/clusters/${selectedCluster}/health`)
+    fetch(`/api/clusters/${selectedCluster}/health`, {
+      headers: getAuthHeader()
+    })
       .then(res => {
         if (!res.ok) {
           throw new Error(`HTTP error ${res.status}`);
@@ -65,14 +69,13 @@ export default function HealthStatus() {
       .finally(() => {
         setLoading(false);
       });
-  }, [selectedCluster]); // <-- Deklarujemy zależność
+  }, [selectedCluster, getAuthHeader]); 
 
-  // --- ZMIANA: useEffect zależy teraz od stabilnej funkcji fetchHealth ---
   useEffect(() => {
-    fetchHealth(); // Pobierz od razu
-    const intervalId = setInterval(fetchHealth, REFRESH_INTERVAL); // Ustaw interwał
-    return () => clearInterval(intervalId); // Wyczyść interwał przy odmontowaniu
-  }, [fetchHealth]); // <-- ZALEŻNOŚĆ
+    fetchHealth();
+    const intervalId = setInterval(fetchHealth, REFRESH_INTERVAL); 
+    return () => clearInterval(intervalId); 
+  }, [fetchHealth]); 
 
   return (
     <Paper sx={{ p: 2, height: '100%' }}>

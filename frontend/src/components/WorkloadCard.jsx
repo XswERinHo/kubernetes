@@ -1,3 +1,5 @@
+// frontend/src/components/WorkloadCard.jsx
+
 import {
   Card, CardContent, CardActions, Typography, Box,
   Button, Chip, Tooltip, IconButton
@@ -8,8 +10,8 @@ import EditIcon from '@mui/icons-material/Edit';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import { useTranslation } from 'react-i18next';
 
-import { formatBytes, parseCpu, parseMemory } from '../utils/formatters'; // <-- ZMIENIONY IMPORT
-import { useCurrencyFormatter } from '../hooks/useCurrencyFormatter'; // <-- NOWY IMPORT
+import { formatBytes, parseCpu, parseMemory } from '../utils/formatters'; 
+import { useCurrencyFormatter } from '../hooks/useCurrencyFormatter'; 
 
 // Funkcje pomocnicze (bez zmian)
 const getUsagePercent = (usage, request) => {
@@ -25,9 +27,12 @@ const getGaugeColor = (value) => {
 };
 
 
-export default function WorkloadCard({ workload, onOpenChart, onOpenEdit, onOpenDetails }) {
+// --- ZMIANA: Odbieramy `canSeeRecommendations` ---
+export default function WorkloadCard({ workload, onOpenChart, onOpenEdit, onOpenDetails, userRole, canSeeRecommendations }) {
   const { t } = useTranslation();
-  const formatCurrency = useCurrencyFormatter(); // <-- UŻYWAMY HOOKA
+  const formatCurrency = useCurrencyFormatter(); 
+  
+  const isAdmin = userRole === 'Admin';
   
   // Logika parsowania (bez zmian)
   const cpuReqParsed = parseCpu(workload.cpuRequests);
@@ -49,22 +54,33 @@ export default function WorkloadCard({ workload, onOpenChart, onOpenEdit, onOpen
               {workload.name}
             </Typography>
           </Box>
-          {workload.recommendations.length > 0 ? (
-            <Tooltip title={t('workloads.recs_chip', { count: workload.recommendations.length })}>
-              <Chip
-                icon={<InfoIcon />}
-                label={workload.recommendations.length}
-                onClick={() => onOpenDetails(workload)}
-                color="warning"
-                size="small"
-                clickable
-              />
-            </Tooltip>
+          
+          {/* --- ZMIANA: Cały blok Chipa jest teraz warunkowy --- */}
+          {canSeeRecommendations ? (
+            // Jeśli może widzieć, sprawdzamy czy są rekomendacje
+            workload.recommendations.length > 0 ? (
+              <Tooltip title={t('workloads.recs_chip', { count: workload.recommendations.length })}>
+                <Chip
+                  icon={<InfoIcon />}
+                  label={workload.recommendations.length}
+                  onClick={() => onOpenDetails(workload)} // Tylko Admin/Editor może tu kliknąć
+                  color="warning"
+                  size="small"
+                  clickable
+                />
+              </Tooltip>
+            ) : (
+              <Chip label={t('workload_card.recommendations_ok')} size="small" color="success" variant="outlined" />
+            )
           ) : (
+            // Jeśli nie może widzieć (Viewer), pokazujemy domyślny Chip "OK" bez funkcji klikania
             <Chip label={t('workload_card.recommendations_ok')} size="small" color="success" variant="outlined" />
           )}
+          {/* --- KONIEC ZMIANY --- */}
+          
         </Box>
 
+        {/* Wskaźniki Gauge (bez zmian) */}
         <Box sx={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', my: 2 }}>
           <Box sx={{ textAlign: 'center' }}>
             <Gauge
@@ -94,6 +110,7 @@ export default function WorkloadCard({ workload, onOpenChart, onOpenEdit, onOpen
           </Box>
         </Box>
 
+        {/* Koszty (bez zmian) */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2 }}>
           <Typography variant="body2">{t('workload_card.cost_usage')}</Typography>
           <Typography variant="body2" sx={{ fontWeight: 'bold' }}>{formatCurrency(workload.usageCost)}</Typography>
@@ -104,12 +121,15 @@ export default function WorkloadCard({ workload, onOpenChart, onOpenEdit, onOpen
         </Box>
       </CardContent>
 
+      {/* Card Actions (bez zmian, logika `isAdmin` jest już poprawna) */}
       <CardActions sx={{ justifyContent: 'flex-end' }}>
-        <Tooltip title={t('workload_card.tooltip_edit')}>
-          <IconButton size="small" onClick={() => onOpenEdit(workload)}>
-            <EditIcon />
-          </IconButton>
-        </Tooltip>
+        {isAdmin && (
+          <Tooltip title={t('workload_card.tooltip_edit')}>
+            <IconButton size="small" onClick={() => onOpenEdit(workload)}>
+              <EditIcon />
+            </IconButton>
+          </Tooltip>
+        )}
         <Tooltip title={t('workload_card.tooltip_chart')}>
           <IconButton size="small" onClick={() => onOpenChart(workload)}>
             <ShowChartIcon />

@@ -6,10 +6,17 @@
   },
   "app_bar": {
     "loading_clusters": "Loading...",
-    "no_clusters_found": "No clusters found"
+    "no_clusters_found": "No clusters found",
+    "logout_btn": "Logout"
   },
   "main_layout": {
     "error_title": "Failed to connect to backend"
+  },
+  "login": {
+    "title": "Sign In",
+    "username": "Username",
+    "password": "Password",
+    "submit_btn": "Sign In"
   },
   "settings": {
     "title": "Settings",

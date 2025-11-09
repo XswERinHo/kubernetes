@@ -1,36 +1,51 @@
 // frontend/src/components/MainLayout.jsx
 
-import { useState, useEffect, useCallback } from 'react'; // <-- IMPORT useCallback
-import { Outlet } from 'react-router-dom';
-import { Box, Drawer, AppBar, Toolbar, Typography, CssBaseline, CircularProgress, Alert } from '@mui/material';
+import { useState, useEffect, useCallback } from 'react';
+import { Outlet, useNavigate } from 'react-router-dom'; // <-- IMPORT useNavigate
+import { 
+  Box, Drawer, AppBar, Toolbar, Typography, CssBaseline, 
+  CircularProgress, Alert, Button, Tooltip, IconButton
+} from '@mui/material';
+import LogoutIcon from '@mui/icons-material/Logout'; // <-- NOWY IMPORT
 import NavList from './NavList';
 import { useTranslation } from 'react-i18next';
 import { useCluster } from '../context/ClusterContext'; 
 import ClusterSelector from './ClusterSelector'; 
+import { useAuth } from '../context/AuthContext'; // <-- NOWY IMPORT
 
 const drawerWidth = 240;
 
 export default function MainLayout() {
   const { t } = useTranslation();
+  const navigate = useNavigate(); // <-- NOWY HOOK
   
   const { selectedCluster, error: clusterError } = useCluster();
+  // --- NOWA LOGIKA: Pobieramy dane autoryzacji ---
+  const { userRole, logout, getAuthHeader } = useAuth(); 
 
   const [workloads, setWorkloads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // --- ZMIANA: Opakowujemy fetchData w useCallback ---
   const fetchData = useCallback(() => {
     if (!selectedCluster) {
-      setLoading(false); // Upewnij się, że ładowanie jest wyłączone, jeśli nie ma klastra
+      setLoading(false); 
       return;
     }
 
     setLoading(true);
     setError(null);
     
-    fetch(`/api/clusters/${selectedCluster}/workloads`)
+    // --- ZMIANA: Dodajemy nagłówek autoryzacji ---
+    fetch(`/api/clusters/${selectedCluster}/workloads`, {
+      headers: getAuthHeader() // <-- DODANY NAGŁÓWEK
+    })
       .then(response => {
+        if (response.status === 401) { // Obsługa wygaśnięcia sesji
+          logout();
+          navigate('/login');
+          throw new Error('Sesja wygasła');
+        }
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         return response.json();
       })
@@ -43,9 +58,9 @@ export default function MainLayout() {
         setError(`Failed to load workloads: ${error.message}`);
       })
       .finally(() => setLoading(false));
-  }, [selectedCluster]); // <-- Deklarujemy zależność od selectedCluster
+  // --- ZMIANA: Dodajemy getAuthHeader i logout do zależności ---
+  }, [selectedCluster, getAuthHeader, logout, navigate]); 
   
-  // --- ZMIANA: Dodajemy fetchData do tablicy zależności ---
   useEffect(() => {
     setWorkloads([]);
     setError(null);
@@ -56,11 +71,14 @@ export default function MainLayout() {
       setError(clusterError);
       setLoading(false);
     }
-  }, [selectedCluster, clusterError, fetchData]); // <-- DODANO fetchData
-  // --- KONIEC ZMIAN ---
+  }, [selectedCluster, clusterError, fetchData]); 
+  
+  // --- NOWA FUNKCJA: Obsługa wylogowania ---
+  const handleLogout = () => {
+    logout();
+    navigate('/login'); // Przekieruj na logowanie po wylogowaniu
+  };
 
-
-  // Funkcja pomocnicza do renderowania treści
   const renderContent = () => {
     if (loading) {
       return (
@@ -75,13 +93,14 @@ export default function MainLayout() {
         <Box sx={{ p: 3 }}>
           <Alert severity="error" variant="filled">
             <Typography variant="h6">{t('main_layout.error_title')}</Typography>
-            <pre>{error}</pre>
+            <pre>{error.toString()}</pre> {/* Używamy toString() dla bezpieczeństwa */}
           </Alert>
         </Box>
       );
     }
 
-    return <Outlet context={{ workloads, fetchData, selectedCluster }} />;
+    // --- ZMIANA: Przekazujemy także userRole ---
+    return <Outlet context={{ workloads, fetchData, selectedCluster, userRole }} />;
   };
 
   return (
@@ -98,6 +117,12 @@ export default function MainLayout() {
           
           <ClusterSelector />
           
+          {/* --- NOWY PRZYCISK WYLOGOWANIA --- */}
+          <Tooltip title={t('app_bar.logout_btn')}>
+            <IconButton color="inherit" onClick={handleLogout}>
+              <LogoutIcon />
+            </IconButton>
+          </Tooltip>
         </Toolbar>
       </AppBar>
       
