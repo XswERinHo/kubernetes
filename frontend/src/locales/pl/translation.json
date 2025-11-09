@@ -2,6 +2,7 @@
   "nav": {
     "dashboard": "Panel Główny",
     "workloads": "Zasoby",
+    "nodes": "Węzły",
     "settings": "Ustawienia"
   },
   "app_bar": {
@@ -42,6 +43,27 @@
     "health_prometheus": "Prometheus API",
     "health_ok": "Połączono",
     "health_error": "Błąd Połączenia"
+  },
+  "nodes": {
+    "title": "Węzły Klastra",
+    "subtitle": "Wyświetlanie węzłów dla klastra: {{cluster}}",
+    "col_name": "Nazwa",
+    "col_status": "Status",
+    "col_pods": "Liczba Podów",
+    "col_cpu": "Zużycie CPU (Alokowalne)",
+    "col_mem": "Zużycie Pamięci (Alokowalne)",
+    "col_labels": "Etykiety",
+    "col_taints": "Skazy",
+    "status_ready": "Gotowy",
+    "status_not_ready": "Niegotowy",
+    "usage_vs_allocatable": "Zużycie vs Alokowalne",
+    "no_labels": "Brak etykiet",
+    "no_taints": "Brak skaz",
+    "modal_pods_title": "Pody na węźle: {{nodeName}}",
+    "modal_pods_ns": "Przestrzeń Nazw",
+    "modal_pods_name": "Nazwa Poda",
+    "modal_pods_status": "Status",
+    "modal_pods_reason": "Powód"
   },
   "workloads": {
     "search_label": "Szukaj po nazwie...",

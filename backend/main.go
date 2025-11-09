@@ -13,10 +13,7 @@ import (
 	"sync"
 	"time"
 
-	// --- NOWY IMPORT DLA JWT ---
 	"github.com/golang-jwt/jwt/v5"
-	// --------------------------
-
 	monitoringClient "github.com/prometheus-operator/prometheus-operator/pkg/client/versioned"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -59,14 +56,39 @@ const (
 	longCacheTTL  = 1 * time.Hour
 )
 
-// Struktura Zdrowia (bez zmian)
+// --- ZMODYFIKOWANA STRUKTURA WĘZŁA ---
+type NodeInfo struct {
+	Name                   string            `json:"name"`
+	Status                 string            `json:"status"`
+	CpuCapacity            string            `json:"cpuCapacity"`
+	MemoryCapacity         string            `json:"memoryCapacity"`
+	CpuAllocatable         string            `json:"cpuAllocatable"`
+	MemoryAllocatable      string            `json:"memoryAllocatable"`
+	CpuUsage               int64             `json:"cpuUsage"`
+	MemoryUsage            int64             `json:"memoryUsage"`
+	CpuAllocatableMilli    int64             `json:"cpuAllocatableMilli"`
+	MemoryAllocatableBytes int64             `json:"memoryAllocatableBytes"`
+	PodCount               int               `json:"podCount"` // <-- NOWE
+	Labels                 map[string]string `json:"labels"`   // <-- NOWE
+	Taints                 []string          `json:"taints"`   // <-- NOWE
+}
+
+// --- NOWA STRUKTURA DLA LISTY PODÓW ---
+type PodInfo struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Status    string `json:"status"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// ---------------------------------
+
 type SystemHealth struct {
 	KubernetesStatus string `json:"kubernetesStatus"`
 	PrometheusStatus string `json:"prometheusStatus"`
 	ErrorMessage     string `json:"errorMessage,omitempty"`
 }
 
-// --- NOWE STRUKTURY DLA AUTORYZACJI ---
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -78,12 +100,9 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// --- NOWY TYP DLA KLUCZA KONTEKSTU ---
 type contextKey string
 
 const userRoleContextKey contextKey = "userRole"
-
-// ------------------------------------
 
 // Struktury (bez zmian)
 type WorkloadInfo struct {
@@ -133,11 +152,13 @@ var minMemRequestBytes int64 = 64 * 1024 * 1024
 var costPerCpuCorePerMonth float64 = 80.0
 var costPerGbRamPerMonth float64 = 40.0
 
-// Szablony PromQL (bez zmian)
+// Zapytania PromQL (bez zmian)
 const avgCpuQueryTemplate = `sum(rate(container_cpu_usage_seconds_total%s[5m])) * 1000`
 const avgMemQueryTemplate = `sum(container_memory_working_set_bytes%s)`
 const p95CpuQueryTemplate = `sum(quantile_over_time(0.95, rate(container_cpu_usage_seconds_total%s[5m])[7d:5m])) * 1000`
 const p95MemQueryTemplate = `sum(quantile_over_time(0.95, container_memory_working_set_bytes%s[7d:5m]))`
+const nodeCpuUsageQuery = `sum by (node) (rate(container_cpu_usage_seconds_total{image!=""}[5m])) * 1000`
+const nodeMemUsageQuery = `sum by (node) (container_memory_working_set_bytes{image!=""})`
 
 func main() {
 	kubeconfigPath := filepath.Join(os.Getenv("USERPROFILE"), ".kube", "config")
@@ -199,10 +220,7 @@ func main() {
 	}
 	promAPI = prometheusv1.NewAPI(promClient)
 
-	// Endpoint publiczny do logowania
 	http.HandleFunc("/api/auth/login", loginHandler)
-
-	// Endpointy chronione przez middleware JWT
 	http.HandleFunc("/api/clusters", jwtAuthenticationMiddleware(clustersHandler))
 	http.HandleFunc("/api/clusters/", jwtAuthenticationMiddleware(clusterApiHandler))
 
@@ -213,7 +231,6 @@ func main() {
 	}
 }
 
-// --- ZMODYFIKOWANY HANDLER LOGOWANIA ---
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Metoda niedozwolona", http.StatusMethodNotAllowed)
@@ -229,7 +246,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	var userRole string
 	if req.Username == "admin" && req.Password == "password123" {
 		userRole = "Admin"
-	} else if req.Username == "editor" && req.Password == "password123" { // <-- DODANA ROLA EDITOR
+	} else if req.Username == "editor" && req.Password == "password123" {
 		userRole = "Editor"
 	} else if req.Username == "viewer" && req.Password == "password123" {
 		userRole = "Viewer"
@@ -261,7 +278,6 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- ZMODYFIKOWANY MIDDLEWARE JWT ---
 func jwtAuthenticationMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
@@ -294,14 +310,11 @@ func jwtAuthenticationMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// --- ZMIANA: Odkomentowano przekazywanie roli do kontekstu ---
 		ctx := context.WithValue(r.Context(), userRoleContextKey, claims.Role)
 		next.ServeHTTP(w, r.WithContext(ctx))
-		// ----------------------------------------------------
 	}
 }
 
-// Handler listy klastrów (bez zmian)
 func clustersHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Metoda niedozwolona", http.StatusMethodNotAllowed)
@@ -336,19 +349,35 @@ func clusterApiHandler(w http.ResponseWriter, r *http.Request) {
 
 	actionPath := "/" + strings.Join(parts[3:], "/")
 
-	// --- ZMIANA: Pobieramy rolę z kontekstu ---
-	// Domyślnie rola "Viewer", jeśli coś pójdzie nie tak (choć nie powinno)
 	role, ok := r.Context().Value(userRoleContextKey).(string)
 	if !ok {
 		role = "Viewer"
 		log.Println("OSTRZEŻENIE: Nie można odczytać roli użytkownika z kontekstu.")
 	}
-	// ------------------------------------
 
 	if strings.HasPrefix(actionPath, "/health") {
 		systemHealthHandler(w, r, clients)
 		return
 	}
+
+	// --- ZMODYFIKOWANY ROUTING DLA WĘZŁÓW ---
+	if strings.HasPrefix(actionPath, "/nodes") {
+		// Ścieżka: /api/clusters/{clusterName}/nodes/{nodeName}/pods
+		// parts: [api, clusters, clusterName, nodes, nodeName, pods] (len 6)
+		if len(parts) == 6 && parts[3] == "nodes" && parts[5] == "pods" {
+			nodeName := parts[4]
+			nodePodsHandler(w, r, clients, nodeName)
+			return
+		}
+
+		// Ścieżka: /api/clusters/{clusterName}/nodes
+		if actionPath == "/nodes" && r.Method == http.MethodGet {
+			nodesHandler(w, r, clients)
+			return
+		}
+	}
+	// ------------------------------------
+
 	if strings.HasPrefix(actionPath, "/workloads") {
 		if actionPath == "/workloads" && r.Method == http.MethodGet {
 			workloadsHandler(w, r, clients)
@@ -356,14 +385,10 @@ func clusterApiHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if strings.HasSuffix(actionPath, "/resources") && r.Method == http.MethodPatch {
-			// --- ZMIANA: Sprawdzanie roli ---
-			// Tylko Admin lub Editor mogą dokonywać zmian
 			if role != "Admin" && role != "Editor" {
 				http.Error(w, "Brak uprawnień. Wymagana rola 'Admin' lub 'Editor'.", http.StatusForbidden)
 				return
 			}
-			// ------------------------------
-
 			resourceParts := strings.Split(strings.Trim(actionPath, "/"), "/")
 			if len(resourceParts) == 5 {
 				namespace := resourceParts[1]
@@ -389,7 +414,186 @@ func clusterApiHandler(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-// ... (reszta plików bez zmian) ...
+// --- NOWA FUNKCJA POMOCNICZA: Pobieranie statusu Poda ---
+func getPodStatus(pod corev1.Pod) (string, string) {
+	if pod.Status.Phase == corev1.PodPending {
+		// Sprawdzanie, czy kontener czeka
+		if len(pod.Status.ContainerStatuses) > 0 {
+			if pod.Status.ContainerStatuses[0].State.Waiting != nil {
+				return string(pod.Status.Phase), pod.Status.ContainerStatuses[0].State.Waiting.Reason
+			}
+		}
+		return string(pod.Status.Phase), "Initializing"
+	}
+
+	if pod.Status.Phase == corev1.PodFailed {
+		return string(pod.Status.Phase), pod.Status.Reason
+	}
+
+	if pod.Status.Phase == corev1.PodRunning {
+		// Sprawdzanie, czy kontenery są gotowe
+		allReady := true
+		for _, cs := range pod.Status.ContainerStatuses {
+			if !cs.Ready {
+				allReady = false
+				// Sprawdzanie, czy któryś jest w CrashLoopBackOff
+				if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
+					return "CrashLoopBackOff", cs.LastTerminationState.Terminated.Reason
+				}
+				// Sprawdzanie, czy któryś jest w Terminated
+				if cs.State.Terminated != nil {
+					return "Terminated", cs.State.Terminated.Reason
+				}
+			}
+		}
+		if allReady {
+			return string(pod.Status.Phase), ""
+		}
+		return "Running", "NotReady" // Działa, ale nie wszystkie kontenery są 'Ready'
+	}
+
+	return string(pod.Status.Phase), pod.Status.Reason
+}
+
+// ----------------------------------------------------
+
+// --- NOWY HANDLER DLA LISTY PODÓW NA WĘŹLE ---
+func nodePodsHandler(w http.ResponseWriter, r *http.Request, clients *ClusterClients, nodeName string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	var podsInfo []PodInfo
+
+	// Pobierz pody używając fieldSelector
+	fieldSelector := fmt.Sprintf("spec.nodeName=%s", nodeName)
+	pods, err := clients.Clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: fieldSelector})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Błąd pobierania podów dla węzła %s: %v", nodeName, err), http.StatusInternalServerError)
+		return
+	}
+
+	for _, pod := range pods.Items {
+		status, reason := getPodStatus(pod)
+		info := PodInfo{
+			Name:      pod.Name,
+			Namespace: pod.Namespace,
+			Status:    status,
+			Reason:    reason,
+		}
+		podsInfo = append(podsInfo, info)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(podsInfo); err != nil {
+		http.Error(w, fmt.Sprintf("Błąd kodowania JSON: %v", err), http.StatusInternalServerError)
+	}
+}
+
+// --------------------------------------------
+
+// --- ZMODYFIKOWANY HANDLER DLA WĘZŁÓW ---
+func nodesHandler(w http.ResponseWriter, r *http.Request, clients *ClusterClients) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	var nodesInfo []NodeInfo
+
+	cpuUsageMap, err := queryPrometheusVectorAsMap(ctx, nodeCpuUsageQuery)
+	if err != nil {
+		log.Printf("Błąd pobierania metryk CPU węzłów: %v", err)
+	}
+	memUsageMap, err := queryPrometheusVectorAsMap(ctx, nodeMemUsageQuery)
+	if err != nil {
+		log.Printf("Błąd pobierania metryk Pamięci węzłów: %v", err)
+	}
+
+	nodes, err := clients.Clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Błąd pobierania węzłów: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	for _, node := range nodes.Items {
+		status := "NotReady"
+		for _, condition := range node.Status.Conditions {
+			if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
+				status = "Ready"
+				break
+			}
+		}
+
+		cpuCap := node.Status.Capacity[corev1.ResourceCPU]
+		memCap := node.Status.Capacity[corev1.ResourceMemory]
+		cpuAlloc := node.Status.Allocatable[corev1.ResourceCPU]
+		memAlloc := node.Status.Allocatable[corev1.ResourceMemory]
+
+		// --- NOWA LOGIKA: Zliczanie podów dla węzła ---
+		fieldSelector := fmt.Sprintf("spec.nodeName=%s", node.Name)
+		pods, err := clients.Clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: fieldSelector})
+		podCount := 0
+		if err != nil {
+			log.Printf("Błąd pobierania podów dla węzła %s: %v", node.Name, err)
+		} else {
+			podCount = len(pods.Items)
+		}
+		// ----------------------------------------
+
+		// --- NOWA LOGIKA: Formatowanie Taintów ---
+		var formattedTaints []string
+		for _, taint := range node.Spec.Taints {
+			formattedTaints = append(formattedTaints, fmt.Sprintf("%s=%s:%s", taint.Key, taint.Value, taint.Effect))
+		}
+		// ------------------------------------
+
+		info := NodeInfo{
+			Name:                   node.Name,
+			Status:                 status,
+			CpuCapacity:            cpuCap.String(),
+			MemoryCapacity:         memCap.String(),
+			CpuAllocatable:         cpuAlloc.String(),
+			MemoryAllocatable:      memAlloc.String(),
+			CpuUsage:               cpuUsageMap[node.Name],
+			MemoryUsage:            memUsageMap[node.Name],
+			CpuAllocatableMilli:    cpuAlloc.MilliValue(),
+			MemoryAllocatableBytes: memAlloc.Value(),
+			PodCount:               podCount,        // <-- NOWE
+			Labels:                 node.Labels,     // <-- NOWE
+			Taints:                 formattedTaints, // <-- NOWE
+		}
+		nodesInfo = append(nodesInfo, info)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(nodesInfo); err != nil {
+		http.Error(w, fmt.Sprintf("Błąd kodowania JSON: %v", err), http.StatusInternalServerError)
+	}
+}
+
+func queryPrometheusVectorAsMap(ctx context.Context, query string) (map[string]int64, error) {
+	result, warnings, err := promAPI.Query(ctx, query, time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("błąd zapytania Prometheus (%s): %v", query, err)
+	}
+	if len(warnings) > 0 {
+		log.Printf("Ostrzeżenia z Prometheus: %v", warnings)
+	}
+
+	vector, ok := result.(model.Vector)
+	if !ok {
+		return nil, fmt.Errorf("oczekiwano wektora z Prometheus, otrzymano %T", result)
+	}
+
+	resultMap := make(map[string]int64)
+	for _, sample := range vector {
+		nodeName := string(sample.Metric["node"])
+		if nodeName != "" {
+			value := int64(math.Round(float64(sample.Value)))
+			resultMap[nodeName] = value
+		}
+	}
+	return resultMap, nil
+}
+
 func systemHealthHandler(w http.ResponseWriter, r *http.Request, clients *ClusterClients) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
@@ -513,6 +717,7 @@ func buildPrometheusSelector(namespace, workloadName string) string {
 	return fmt.Sprintf(`{namespace="%s", pod=~"%s-.*"}`, namespace, workloadName)
 }
 
+// Funkcja pomocnicza do odczytu zasobów
 func getResourceTotals(spec corev1.PodSpec) (cpuReqTotal, cpuLimTotal, memReqTotal, memLimTotal resource.Quantity, hasCpuReq, hasMemReq, hasCpuLim, hasMemLim bool) {
 	for _, container := range spec.Containers {
 		if reqCpu, ok := container.Resources.Requests[corev1.ResourceCPU]; ok && reqCpu.Value() > 0 {

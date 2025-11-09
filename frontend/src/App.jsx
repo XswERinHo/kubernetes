@@ -6,11 +6,12 @@ import MainLayout from './components/MainLayout';
 import Dashboard from './views/Dashboard';
 import Workloads from './views/Workloads';
 import Settings from './views/Settings';
+import Nodes from './views/Nodes'; // <-- NOWY IMPORT
 import { ThemeModeContext } from './context/ThemeContext';
 import { ClusterProvider } from './context/ClusterContext';
-import { AuthProvider } from './context/AuthContext'; // <-- NOWY IMPORT
-import Login from './views/Login'; // <-- NOWY IMPORT
-import ProtectedRoute from './components/ProtectedRoute'; // <-- NOWY IMPORT
+import { AuthProvider } from './context/AuthContext'; 
+import Login from './views/Login'; 
+import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
   const [mode, setMode] = useState('dark');
@@ -39,24 +40,19 @@ function App() {
     <ThemeModeContext.Provider value={themeModeApi}>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        {/* AuthProvider musi być na zewnątrz ClusterProvider, 
-            ponieważ ClusterProvider będzie potrzebował tokenu do wysłania zapytania */}
         <AuthProvider>
           <ClusterProvider>
             <Routes>
-              {/* --- NOWA STRUKTURA ROUTINGU --- */}
               
-              {/* Ścieżka publiczna do logowania */}
               <Route path="/login" element={<Login />} />
 
-              {/* Ścieżki chronione */}
               <Route element={<ProtectedRoute />}>
                 <Route path="/" element={<MainLayout />}>
                   <Route path="dashboard" element={<Dashboard />} />
                   <Route path="workloads" element={<Workloads />} />
+                  <Route path="nodes" element={<Nodes />} /> {/* <-- NOWA ŚCIEŻKA */}
                   <Route path="settings" element={<Settings />} />
                   
-                  {/* Przekierowanie z / na /dashboard */}
                   <Route index element={<Navigate to="/dashboard" replace />} />
                 </Route>
               </Route>

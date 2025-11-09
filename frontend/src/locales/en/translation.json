@@ -2,6 +2,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "workloads": "Workloads",
+    "nodes": "Nodes",
     "settings": "Settings"
   },
   "app_bar": {
@@ -42,6 +43,27 @@
     "health_prometheus": "Prometheus API",
     "health_ok": "Connected",
     "health_error": "Connection Error"
+  },
+  "nodes": {
+    "title": "Cluster Nodes",
+    "subtitle": "Showing nodes for cluster: {{cluster}}",
+    "col_name": "Name",
+    "col_status": "Status",
+    "col_pods": "Pod Count",
+    "col_cpu": "CPU Usage (Allocatable)",
+    "col_mem": "Memory Usage (Allocatable)",
+    "col_labels": "Labels",
+    "col_taints": "Taints",
+    "status_ready": "Ready",
+    "status_not_ready": "Not Ready",
+    "usage_vs_allocatable": "Usage vs Allocatable",
+    "no_labels": "No labels",
+    "no_taints": "No taints",
+    "modal_pods_title": "Pods on node: {{nodeName}}",
+    "modal_pods_ns": "Namespace",
+    "modal_pods_name": "Pod Name",
+    "modal_pods_status": "Status",
+    "modal_pods_reason": "Reason"
   },
   "workloads": {
     "search_label": "Search by name...",
