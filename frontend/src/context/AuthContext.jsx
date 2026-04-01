@@ -1,24 +1,19 @@
-// frontend/src/context/AuthContext.jsx
+import { createContext, useContext, useState, useMemo, useCallback } from 'react';
 
-import { createContext, useContext, useState, useMemo } from 'react';
-
-// Przechowujemy token i rolę
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  // Próbujemy odczytać zapisany stan z localStorage przy starcie
   const [token, setToken] = useState(localStorage.getItem('authToken'));
   const [userRole, setUserRole] = useState(localStorage.getItem('userRole'));
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Funkcja logowania
   const login = async (username, password) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -31,7 +26,6 @@ export function AuthProvider({ children }) {
 
       const { token, role } = await response.json();
 
-      // Zapisz token i rolę w stanie i localStorage
       localStorage.setItem('authToken', token);
       localStorage.setItem('userRole', role);
       setToken(token);
@@ -47,28 +41,33 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Funkcja wylogowania
-  const logout = () => {
+  const logout = useCallback(() => {
+    // if (token) {
+    //   fetch('/api/auth/logout', {
+    //     method: 'POST',
+    //     headers: {
+    //       'Content-Type': 'application/json',
+    //       Authorization: `Bearer ${token}`,
+    //     },
+    //   }).catch((err) => console.error('Logout request failed', err));
+    // }
+
     localStorage.removeItem('authToken');
     localStorage.removeItem('userRole');
     setToken(null);
     setUserRole(null);
-  };
+  }, [token]);
 
-  // Stworzenie "publicznego" API naszego kontekstu
   const value = useMemo(() => ({
     token,
     userRole,
-    isAuthenticated: !!token, // Prosty boolean, czy jesteśmy zalogowani
+    isAuthenticated: !!token,
     login,
     logout,
     loading,
     error,
-    // Funkcja pomocnicza do tworzenia nagłówków
-    getAuthHeader: () => ({
-      'Authorization': `Bearer ${token}`
-    })
-  }), [token, userRole, loading, error]);
+    getAuthHeader: () => (token ? { 'Authorization': `Bearer ${token}` } : {}),
+  }), [token, userRole, loading, error, logout]);
 
   return (
     <AuthContext.Provider value={value}>

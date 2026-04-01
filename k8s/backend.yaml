@@ -1,0 +1,125 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-manager-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-manager-role
+rules:
+- apiGroups: ["", "apps", "batch", "metrics.k8s.io"]
+  resources: ["nodes", "pods", "pods/log", "deployments", "statefulsets", "daemonsets", "cronjobs", "services", "namespaces", "events", "configmaps"]
+  verbs: ["get", "list", "watch", "update", "patch"]
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["prometheuses", "servicemonitors"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-manager-binding
+subjects:
+- kind: ServiceAccount
+  name: k8s-manager-sa
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: k8s-manager-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      serviceAccountName: k8s-manager-sa
+      initContainers:
+      - name: wait-for-mongodb
+        image: busybox:1.28
+        command: ['sh', '-c', 'until nc -z mongodb 27017; do echo waiting for mongodb; sleep 2; done']
+      containers:
+      - name: backend
+        image: k8s-manager-backend:latest
+        imagePullPolicy: Never  # Use local image
+        ports:
+        - containerPort: 8080
+        env:
+        - name: IN_CLUSTER
+          value: "true"
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: k8s-manager-secrets
+              key: mongo-uri
+        - name: PROMETHEUS_URL
+          value: "http://prometheus-operated.monitoring.svc:9090" # Adjust if needed
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: k8s-manager-secrets
+              key: jwt-secret
+              optional: true
+        - name: SMTP_HOST
+          value: "smtp.poczta.onet.pl" # e.g. smtp.email.us-phoenix-1.oci.oraclecloud.com
+        - name: SMTP_PORT
+          value: "587"
+        - name: SMTP_USER
+          valueFrom:
+            secretKeyRef:
+              name: k8s-manager-secrets
+              key: smtp-user
+              optional: true
+        - name: SMTP_PASS
+          valueFrom:
+            secretKeyRef:
+              name: k8s-manager-secrets
+              key: smtp-pass
+              optional: true
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "80m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        startupProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 30
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+spec:
+  selector:
+    app: backend
+  ports:
+  - port: 8080
+    targetPort: 8080
+

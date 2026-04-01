@@ -3,15 +3,9 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import './index.css';
 import App from './App.jsx';
-import './i18n'; // Importujemy i inicjujemy i18n
+import './i18n';
 
-// --- ZMIANA TUTAJ ---
-// Importujemy komponent zamiast go definiować
-import LoaderFallback from './components/LoaderFallback'; 
-// --- KONIEC ZMIANY ---
-
-
-// Usunęliśmy definicję komponentu LoaderFallback stąd
+import LoaderFallback from './components/LoaderFallback';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

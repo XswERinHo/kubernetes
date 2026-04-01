@@ -12,3 +12,5 @@
 # (nazwa może być inna w zależności od systemu)
 /backend/backend.exe
 /backend/backend
+# Lokalna binarka backend
+/backend/server.exe

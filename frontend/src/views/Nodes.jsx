@@ -56,7 +56,17 @@ const KeyValueTooltip = ({ data, type }) => {
 
   return (
     <Tooltip title={<Box sx={{ p: 1, maxWidth: 600 }}>{content}</Box>} placement="top">
-      <Chip icon={<InfoIcon />} label={count} size="small" />
+      <Chip 
+        icon={<InfoIcon sx={{ color: 'inherit !important' }} />} 
+        label={count} 
+        size="small" 
+        sx={{ 
+          backgroundColor: 'rgba(255, 255, 255, 0.05)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          color: 'text.secondary',
+          '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.1)' }
+        }}
+      />
     </Tooltip>
   );
 }
@@ -108,112 +118,128 @@ export default function Nodes() {
     fetchNodes();
   }, [fetchNodes]);
 
-  const renderContent = () => {
-    if (loading) {
-      return (
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-          <CircularProgress />
-        </Box>
-      );
-    }
-
-    if (error) {
-      return (
-        <Alert severity="error" variant="filled" sx={{ mt: 2 }}>
-          {error}
-        </Alert>
-      );
-    }
-
-    return (
-      <TableContainer component={Paper}>
-        <Table sx={{ minWidth: 650 }}>
-          <TableHead>
-            <TableRow>
-              <TableCell>{t('nodes.col_name')}</TableCell>
-              <TableCell>{t('nodes.col_status')}</TableCell>
-              <TableCell align="center">{t('nodes.col_pods')}</TableCell>
-              <TableCell>{t('nodes.col_cpu')}</TableCell>
-              <TableCell>{t('nodes.col_mem')}</TableCell>
-              <TableCell align="center">{t('nodes.col_labels')}</TableCell>
-              <TableCell align="center">{t('nodes.col_taints')}</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {nodes.map((node) => {
-              const cpuPercent = getUsagePercent(node.cpuUsage, node.cpuAllocatableMilli);
-              const memPercent = getUsagePercent(node.memoryUsage, node.memoryAllocatableBytes);
-              
-              return (
-                <TableRow key={node.name} sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
-                  <TableCell component="th" scope="row">
-                    <Typography variant="body1" fontWeight="bold">{node.name}</Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      icon={node.status === 'Ready' ? <CheckCircleIcon /> : <ErrorIcon />}
-                      label={node.status === 'Ready' ? t('nodes.status_ready') : t('nodes.status_not_ready')}
-                      color={node.status === 'Ready' ? 'success' : 'error'}
-                      size="small"
-                      variant="outlined"
-                    />
-                  </TableCell>
-                  <TableCell align="center">
-                    <Button 
-                      size="small" 
-                      onClick={() => setSelectedNodeForPods(node.name)}
-                    >
-                      {node.podCount}
-                    </Button>
-                  </TableCell>
-                  <TableCell>
-                    <PercentageBar value={cpuPercent} />
-                    <Tooltip title={`${t('nodes.usage_vs_allocatable')}: ${formatMilliCpu(node.cpuUsage)} / ${node.cpuAllocatable}`}>
-                      <Typography variant="body2" color="text.secondary">
-                        {`${cpuPercent}%`}
-                      </Typography>
-                    </Tooltip>
-                  </TableCell>
-                  <TableCell>
-                    <PercentageBar value={memPercent} />
-                    <Tooltip title={`${t('nodes.usage_vs_allocatable')}: ${formatBytes(node.memoryUsage, 1)} / ${node.memoryAllocatable}`}>
-                      <Typography variant="body2" color="text.secondary">
-                        {`${memPercent}%`}
-                      </Typography>
-                    </Tooltip>
-                  </TableCell>
-                  <TableCell align="center">
-                    <KeyValueTooltip data={node.labels} type="labels" />
-                  </TableCell>
-                  <TableCell align="center">
-                    <KeyValueTooltip data={node.taints} type="taints" />
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    );
-  };
-
-
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>
-        {t('nodes.title')}
-      </Typography>
-      <Typography variant="body1" color="text.secondary" gutterBottom>
-        {t('nodes.subtitle', { cluster: selectedCluster })}
-      </Typography>
-      <Box sx={{ mt: 3 }}>
-        {renderContent()}
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4" component="h1" gutterBottom sx={{ 
+          background: 'linear-gradient(45deg, #38bdf8 30%, #818cf8 90%)',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+          fontWeight: 'bold'
+        }}>
+          {t('nodes.title')}
+        </Typography>
+        <Typography variant="subtitle1" color="text.secondary">
+          {t('nodes.subtitle', { cluster: selectedCluster })}
+        </Typography>
       </Box>
 
+      {loading && <CircularProgress />}
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
+      {!loading && !error && (
+        <TableContainer component={Paper} sx={{ 
+          background: 'transparent', // Przezroczystość dla efektu szkła z App.jsx
+          boxShadow: 'none'
+        }}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>{t('nodes.col_name')}</TableCell>
+                <TableCell>{t('nodes.col_status')}</TableCell>
+                <TableCell align="center">{t('nodes.col_pods')}</TableCell>
+                <TableCell>{t('nodes.col_cpu')}</TableCell>
+                <TableCell>{t('nodes.col_mem')}</TableCell>
+                <TableCell>{t('nodes.col_disk')}</TableCell>
+                <TableCell align="center">{t('nodes.col_labels')}</TableCell>
+                <TableCell align="center">{t('nodes.col_taints')}</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {nodes.map((node) => {
+                const cpuPercent = getUsagePercent(node.cpuUsage, node.cpuAllocatableMilli);
+                const memPercent = getUsagePercent(node.memoryUsage, node.memoryAllocatableBytes);
+                const diskPercent = getUsagePercent(node.ephemeralStorageUsageBytes, node.ephemeralStorageAllocatableBytes);
+
+                return (
+                  <TableRow 
+                    key={node.name}
+                    hover
+                    sx={{ 
+                      '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.03) !important' },
+                      transition: 'background-color 0.2s'
+                    }}
+                  >
+                    <TableCell component="th" scope="row" sx={{ fontWeight: 'bold' }}>
+                      {node.name}
+                    </TableCell>
+                    <TableCell>
+                      <Chip 
+                        icon={node.status === 'Ready' ? <CheckCircleIcon /> : <ErrorIcon />} 
+                        label={node.status} 
+                        color={node.status === 'Ready' ? 'success' : 'error'} 
+                        variant="outlined"
+                        size="small"
+                        sx={{ 
+                          fontWeight: 600,
+                          borderColor: node.status === 'Ready' ? '#4ade80' : '#f87171',
+                          color: node.status === 'Ready' ? '#4ade80' : '#f87171',
+                          '& .MuiChip-icon': { color: 'inherit' }
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <Button 
+                        variant="text" 
+                        size="small" 
+                        onClick={() => setSelectedNodeForPods(node.name)}
+                        sx={{ minWidth: 'auto', fontWeight: 'bold', color: '#38bdf8' }}
+                      >
+                        {node.podCount}
+                      </Button>
+                    </TableCell>
+                    <TableCell sx={{ width: '20%' }}>
+                      <PercentageBar 
+                        value={cpuPercent} 
+                        label={`${cpuPercent}%`} 
+                        colorStart="#38bdf8" 
+                        colorEnd="#818cf8" 
+                      />
+                    </TableCell>
+                    <TableCell sx={{ width: '20%' }}>
+                      <PercentageBar 
+                        value={memPercent} 
+                        label={`${memPercent}%`} 
+                        colorStart="#818cf8" 
+                        colorEnd="#c084fc" 
+                      />
+                    </TableCell>
+                    <TableCell sx={{ width: '15%' }}>
+                      <PercentageBar 
+                        value={diskPercent} 
+                        label={`${diskPercent}%`} 
+                        colorStart="#2dd4bf" 
+                        colorEnd="#38bdf8" 
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <KeyValueTooltip data={node.labels} type="labels" />
+                    </TableCell>
+                    <TableCell align="center">
+                      <KeyValueTooltip data={node.taints} type="taints" />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+
       <NodePodsModal 
-        open={Boolean(selectedNodeForPods)}
-        nodeName={selectedNodeForPods}
-        onClose={() => setSelectedNodeForPods(null)}
+        open={!!selectedNodeForPods} 
+        nodeName={selectedNodeForPods} 
+        onClose={() => setSelectedNodeForPods(null)} 
       />
     </Box>
   );

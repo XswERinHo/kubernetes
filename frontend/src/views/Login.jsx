@@ -40,7 +40,10 @@ export default function Login() {
         }}
       >
         <LockOutlinedIcon color="primary" sx={{ fontSize: 40, mb: 1 }} />
-        <Typography component="h1" variant="h5">
+        <Typography component="h1" variant="h4" fontWeight="bold" color="primary" sx={{ mb: 1 }}>
+          Sentinel
+        </Typography>
+        <Typography component="h2" variant="h6" color="text.secondary">
           {t('login.title')}
         </Typography>
         <Box component="form" onSubmit={handleSubmit} noValidate sx={{ mt: 1 }}>

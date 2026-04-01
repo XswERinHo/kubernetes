@@ -9,25 +9,38 @@ const getBarColor = (value, theme) => {
   return theme.palette.success.main;
 };
 
-export default function PercentageBar({ value }) {
+export default function PercentageBar({ value, label, colorStart, colorEnd }) {
   const theme = useTheme();
-  const color = getBarColor(value, theme);
+  
+  // Domyślne kolory jeśli nie podano (zachowanie kompatybilności)
+  const defaultColor = getBarColor(value, theme);
+  
+  const backgroundStyle = (colorStart && colorEnd) 
+    ? `linear-gradient(90deg, ${colorStart} 0%, ${colorEnd} 100%)`
+    : defaultColor;
 
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-      <Box sx={{ width: '100%', mr: 1 }}>
-        <LinearProgress
-          variant="determinate"
-          value={value}
-          sx={{
-            height: 10,
-            borderRadius: 5,
-            [`& .MuiLinearProgress-bar`]: {
-              backgroundColor: color,
-            },
-          }}
-        />
+    <Box sx={{ width: '100%' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+        {label && (
+          <Box component="span" sx={{ fontSize: '0.75rem', fontWeight: 600, color: 'text.secondary' }}>
+            {label}
+          </Box>
+        )}
       </Box>
+      <LinearProgress
+        variant="determinate"
+        value={value}
+        sx={{
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+          [`& .MuiLinearProgress-bar`]: {
+            background: backgroundStyle,
+            borderRadius: 4,
+          },
+        }}
+      />
     </Box>
   );
 }

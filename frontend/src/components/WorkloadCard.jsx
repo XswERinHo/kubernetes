@@ -11,7 +11,6 @@ import ShowChartIcon from '@mui/icons-material/ShowChart';
 import { useTranslation } from 'react-i18next';
 
 import { formatBytes, parseCpu, parseMemory } from '../utils/formatters'; 
-import { useCurrencyFormatter } from '../hooks/useCurrencyFormatter'; 
 
 // Funkcje pomocnicze (bez zmian)
 const getUsagePercent = (usage, request) => {
@@ -30,9 +29,9 @@ const getGaugeColor = (value) => {
 // --- ZMIANA: Odbieramy `canSeeRecommendations` ---
 export default function WorkloadCard({ workload, onOpenChart, onOpenEdit, onOpenDetails, userRole, canSeeRecommendations }) {
   const { t } = useTranslation();
-  const formatCurrency = useCurrencyFormatter(); 
   
   const isAdmin = userRole === 'Admin';
+  const canEditResources = userRole === 'Admin' || userRole === 'Editor';
   
   // Logika parsowania (bez zmian)
   const cpuReqParsed = parseCpu(workload.cpuRequests);
@@ -42,8 +41,25 @@ export default function WorkloadCard({ workload, onOpenChart, onOpenEdit, onOpen
   const cpuColor = getGaugeColor(cpuPercent);
   const memColor = getGaugeColor(memPercent);
 
+  // Calculate total recommendations
+  const totalRecommendations = workload.containers 
+    ? workload.containers.reduce((acc, c) => acc + (c.recommendations ? c.recommendations.length : 0), 0)
+    : (workload.recommendations ? workload.recommendations.length : 0);
+
   return (
-    <Card sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <Card sx={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      height: '100%',
+      transition: 'all 0.3s ease-in-out',
+      '&:hover': {
+        transform: 'translateY(-5px)',
+        boxShadow: (theme) => theme.palette.mode === 'dark' 
+          ? '0 12px 40px rgba(0,0,0,0.3)' 
+          : '0 12px 40px rgba(0,0,0,0.1)',
+        borderColor: (theme) => theme.palette.primary.main,
+      }
+    }}>
       <CardContent sx={{ flexGrow: 1 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <Box>
@@ -58,11 +74,11 @@ export default function WorkloadCard({ workload, onOpenChart, onOpenEdit, onOpen
           {/* --- ZMIANA: Cały blok Chipa jest teraz warunkowy --- */}
           {canSeeRecommendations ? (
             // Jeśli może widzieć, sprawdzamy czy są rekomendacje
-            workload.recommendations.length > 0 ? (
-              <Tooltip title={t('workloads.recs_chip', { count: workload.recommendations.length })}>
+            totalRecommendations > 0 ? (
+              <Tooltip title={t('workloads.recs_chip', { count: totalRecommendations })}>
                 <Chip
                   icon={<InfoIcon />}
-                  label={workload.recommendations.length}
+                  label={totalRecommendations}
                   onClick={() => onOpenDetails(workload)} // Tylko Admin/Editor może tu kliknąć
                   color="warning"
                   size="small"
@@ -110,20 +126,11 @@ export default function WorkloadCard({ workload, onOpenChart, onOpenEdit, onOpen
           </Box>
         </Box>
 
-        {/* Koszty (bez zmian) */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2 }}>
-          <Typography variant="body2">{t('workload_card.cost_usage')}</Typography>
-          <Typography variant="body2" sx={{ fontWeight: 'bold' }}>{formatCurrency(workload.usageCost)}</Typography>
-        </Box>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-          <Typography variant="body2">{t('workload_card.cost_request')}</Typography>
-          <Typography variant="body2">{formatCurrency(workload.requestCost)}</Typography>
-        </Box>
       </CardContent>
 
       {/* Card Actions (bez zmian, logika `isAdmin` jest już poprawna) */}
       <CardActions sx={{ justifyContent: 'flex-end' }}>
-        {isAdmin && (
+        {canEditResources && (
           <Tooltip title={t('workload_card.tooltip_edit')}>
             <IconButton size="small" onClick={() => onOpenEdit(workload)}>
               <EditIcon />

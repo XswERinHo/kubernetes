@@ -2,6 +2,53 @@
 
 Aplikacja webowa do monitorowania, optymalizacji i zarządzania zasobami (CPU, RAM) oraz kosztami w klastrach Kubernetes.
 
+## Szybki Start (GitHub)
+
+### Wymagania
+- Git
+- Docker Desktop (z włączonym Kubernetes)
+- kubectl
+- PowerShell (Windows)
+- Helm (opcjonalnie, dla pełnych metryk Prometheus)
+
+### 1. Klonowanie repo
+```powershell
+git clone <twoj-repo-url>
+cd kubernetes-main
+```
+
+### 2. (Opcjonalnie) Instalacja Prometheus przez Helm
+```powershell
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm install prometheus prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
+```
+
+### 3. Weryfikacja sekretów
+Plik `k8s/secrets.yaml` zawiera tylko przykładowe wartości. Przed użyciem produkcyjnym podmień:
+- `smtp-user`
+- `smtp-pass`
+- `jwt-secret`
+
+Wartości muszą być zakodowane Base64.
+
+### 4. Build i deploy (automatyzacja)
+```powershell
+.\update_k8s.ps1
+```
+
+Skrypt automatycznie:
+- buduje obraz backendu,
+- buduje obraz frontendu,
+- aplikuje manifesty Kubernetes z `k8s/`,
+- restartuje deploymenty backend/frontend.
+
+### 5. Dostęp do aplikacji
+- Frontend: `http://localhost:30080`
+- Domyślne konto (przy pustej bazie): `admin / password123`
+
+### Uwaga o środowisku
+Manifesty używają `imagePullPolicy: Never`, więc ta konfiguracja jest przygotowana pod lokalny klaster (np. Docker Desktop Kubernetes). Dla klastra chmurowego trzeba użyć registry obrazów i zmienić `image` + `imagePullPolicy`.
+
 ## Wizja Produktu (Docelowe Funkcje)
 
 Celem jest stworzenie inteligentnego asystenta, który aktywnie pomaga w optymalizacji klastra. Kluczowe obszary rozwoju:
@@ -19,11 +66,7 @@ Celem jest stworzenie inteligentnego asystenta, który aktywnie pomaga w optymal
 * Wykrywanie anomalii w zużyciu zasobów.
 
 ### 3. Koncentracja na Kosztach (FinOps) 💲
-* Widoczność kosztów per klaster, namespace, zasób, etykieta.
-* Integracja z API chmury lub Kubecost/OpenCost.
-* Kwantyfikacja finansowa rekomendacji (szacowane oszczędności).
-* Możliwości alokacji kosztów (Showback/Chargeback).
-* **Powiązanie z i18n:** Backend powinien obliczać koszty w jednej walucie bazowej. Frontend powinien być odpowiedzialny za **przewalutowanie** i formatowanie kwot w zależności od wybranego języka (np. PLN dla języka polskiego, USD dla angielskiego).
+* (Sekcja usunięta - projekt zmienił kierunek na zarządzanie operacyjne)
 
 ### 4. Ułatwione Zarządzanie i Działanie ⚙️
 * Akcje "jednym kliknięciem" do stosowania rekomendacji.
@@ -61,7 +104,7 @@ Aplikacja webowa (Go + React) do monitorowania, optymalizacji i zarządzania zas
 
 To, co jest już zaimplementowane i działa:
 
-* ✅ **Dashboard FinOps:** Agregacja kosztów zużycia i żądań w skali miesiąca, wizualizacja kosztów per przestrzeń nazw (namespace).
+* ✅ **Dashboard Operacyjny:** Agregacja liczby workloadów, przestrzeni nazw i aktywnych alertów.
 * ✅ **Wsparcie dla Wielu Klastrów:** Dynamiczne ładowanie wszystkich kontekstów z lokalnego pliku `kubeconfig` i selektor klastrów w UI.
 * ✅ **Zarządzanie Zasobami (Workloads):** Przeglądanie `Deployments`, `StatefulSets`, `DaemonSets` i `CronJobs`. Możliwość ręcznej edycji `requests` i `limits`.
 * ✅ **Zaawansowane Rekomendacje:** Silnik rekomendacji w backendzie, który wykrywa:
@@ -73,7 +116,11 @@ To, co jest już zaimplementowane i działa:
 * ✅ **Nowoczesny UI/UX:**
     * Motyw Ciemny / Jasny (przełączany w ustawieniach).
     * Pełna internacjonalizacja (i18n) dla języka polskiego (PL) i angielskiego (EN).
-    * Inteligentne formatowanie walut (PLN/USD) w zależności od wybranego języka.
+* ✅ **Alerty i powiadomienia:** Backendowy silnik reguł (/api/alerts), UI do konfiguracji progów, statystyki i kafelki alertów na dashboardzie. Integracja z Webhookami (np. Slack).
+* ✅ **RBAC i Zarządzanie Użytkownikami:**
+    * Trwałe przechowywanie użytkowników w MongoDB.
+    * Role: Admin, Editor, Viewer.
+    * Panel administratora do zarządzania użytkownikami.
 
 ---
 
@@ -85,28 +132,28 @@ Celem jest stworzenie inteligentnego asystenta, który aktywnie pomaga w optymal
 
 Kolejne funkcje planowane do implementacji:
 
-#### 2.1 Role-Based Access Control (RBAC) ⭐⭐
-* **Cel:** Bezpieczeństwo i podział uprawnień.
-* **Backend:** Integracja z JWT/OAuth2. Endpointy `/api/auth/login`, `/api/auth/logout`. Middleware sprawdzające uprawnienia. Logi audytowe.
-* **Frontend:** Ekran logowania. Warunkowe renderowanie UI na bazie ról:
-    * **Admin:** Pełna kontrola.
-    * **Editor (Moderator):** Może aplikować rekomendacje, ręczne edycje wymagają zatwierdzenia.
-    * **Viewer:** Dostęp tylko do odczytu.
-
 #### 2.2 Widok Węzłów (Nodes View) ⭐⭐
 * **Cel:** Monitoring węzłów klastra i planowanie pojemności.
 * **Backend:** Endpoint `/api/nodes` zwracający listę węzłów, ich metryki CPU/Memory/Disk, status, alokację podów, etykiety i tainty.
 * **Frontend:** Dedykowana zakładka "Nodes". Tabela/Grid z węzłami (Capacity vs Allocatable vs Used). Drill-down do listy podów na węźle.
 
-#### 2.3 Alokacja Kosztów (Cost Allocation) ⭐⭐
-* **Cel:** Wdrożenie zasad FinOps – przypisywanie kosztów do zespołów/projektów.
-* **Backend:** Endpoint `/api/costs/allocation` grupujący koszty po etykietach (`team`, `project`). Integracja z OpenCost/Kubecost API. Eksport raportów CSV.
-* **Frontend:** Zakładka "Cost Allocation". Wykresy kosztów per team/project. Śledzenie budżetów.
+#### 2.3 Zaawansowana Alokacja Kosztów (Showback/Chargeback) ⭐⭐
+* (Sekcja usunięta)
 
-#### 2.4 Alerty i Powiadomienia ⭐⭐
-* **Cel:** Proaktywne powiadomienia o problemach.
-* **Backend:** Konfiguracja reguł alertów (np. wysokie koszty, OOMKilled). Integracja z Slack/Email/Webhooks. Endpoint `/api/alerts` z historią.
-* **Frontend:** Zakładka "Alerts". Konfiguracja kanałów powiadomień w Ustawieniach. Wizualne alerty na Dashboard.
+#### 2.4 Rozszerzone Integracje Alertów ⭐⭐
+* **Cel:** Dalsza rozbudowa powiadomień.
+* **Backend:** Integracje Email, scheduler do batchowania, eskalacje per priorytet.
+* **Frontend:** Szablony komunikatów, możliwość testowego wysłania alertu.
+
+#### 2.3 Zaawansowana Alokacja Kosztów (Showback/Chargeback) ⭐⭐
+* **Cel:** Rozszerzyć obecną zakładkę Cost Allocation o budżety per zespół/projekt i eksporty rozliczeń.
+* **Backend:** Grupy kosztów po etykietach (`team`, `project`, `env`), integracja z OpenCost/Kubecost, generowanie raportów CSV/JSON.
+* **Frontend:** Monitorowanie realizacji budżetów, alerty progów finansowych, filtrowanie po etykietach i okresach.
+
+#### 2.4 Integracje Alertów i automatyczne kanały ⭐⭐
+* **Cel:** Wykorzystać istniejący silnik reguł do wysyłki powiadomień poza UI.
+* **Backend:** Integracje Webhook/Slack/Email, scheduler do batchowania, eskalacje per priorytet.
+* **Frontend:** Ustawienia kanałów, szablony komunikatów, możliwość testowego wysłania alertu.
 
 ---
 

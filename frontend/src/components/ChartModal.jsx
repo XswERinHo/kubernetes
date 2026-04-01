@@ -163,14 +163,37 @@ export default function ChartModal({ workload, open, onClose }) {
                 <Box sx={{ height: 300, width: '100%' }}>
                   <LineChart
                     dataset={data.cpuUsage}
-                    series={[{ dataKey: 'y', label: 'CPU (mCores)', valueFormatter: cpuValueFormatter, showMark: false }]}
-                    xAxis={[{ dataKey: 'x', scaleType: 'time', valueFormatter: timeFormatter }]}
-                    yAxis={[{ valueFormatter: cpuValueFormatter, min: cpuBounds.yMin, max: cpuBounds.yMax }]}
-                    sx={{ [`.${axisClasses.left} .${axisClasses.label}`]: { transform: 'translate(-10px, 0)' } }}
+                    series={[{ 
+                      dataKey: 'y', 
+                      label: 'CPU (mCores)', 
+                      valueFormatter: cpuValueFormatter, 
+                      showMark: false,
+                      area: true, // Wypełnienie pod wykresem
+                      color: '#38bdf8', // Sky Blue
+                      curve: 'monotoneX', // Wygładzanie linii
+                    }]}
+                    xAxis={[{ 
+                      dataKey: 'x', 
+                      scaleType: 'time', 
+                      valueFormatter: timeFormatter,
+                      tickLabelStyle: { fill: '#94a3b8' }, // Kolor etykiet osi X
+                    }]}
+                    yAxis={[{ 
+                      valueFormatter: cpuValueFormatter, 
+                      min: cpuBounds.yMin, 
+                      max: cpuBounds.yMax,
+                      tickLabelStyle: { fill: '#94a3b8' }, // Kolor etykiet osi Y
+                    }]}
+                    grid={{ horizontal: true }} // Subtelna siatka
+                    sx={{ 
+                      [`.${axisClasses.left} .${axisClasses.label}`]: { transform: 'translate(-10px, 0)' },
+                      // Stylizacja siatki
+                      '.MuiChartsGrid-line': { stroke: 'rgba(255,255,255,0.1) !important' }
+                    }}
                     margin={{ left: 60 }}
                   >
-                    {cpuReq && ( <ChartsReferenceLine y={cpuReq} label={t('chart_modal.cpu_req_label', { value: cpuReq })} labelAlign="start" lineStyle={{ stroke: 'green', strokeDasharray: '4 4' }} labelStyle={{ fill: 'green' }}/> )}
-                    {cpuLim && ( <ChartsReferenceLine y={cpuLim} label={t('chart_modal.cpu_lim_label', { value: cpuLim })} labelAlign="start" lineStyle={{ stroke: 'red', strokeDasharray: '4 4' }} labelStyle={{ fill: 'red' }}/> )}
+                    {cpuReq && ( <ChartsReferenceLine y={cpuReq} label={t('chart_modal.cpu_req_label', { value: cpuReq })} labelAlign="start" lineStyle={{ stroke: '#4ade80', strokeDasharray: '4 4' }} labelStyle={{ fill: '#4ade80' }}/> )}
+                    {cpuLim && ( <ChartsReferenceLine y={cpuLim} label={t('chart_modal.cpu_lim_label', { value: cpuLim })} labelAlign="start" lineStyle={{ stroke: '#f87171', strokeDasharray: '4 4' }} labelStyle={{ fill: '#f87171' }}/> )}
                   </LineChart>
                 </Box>
               ) : <Typography>{t('chart_modal.no_cpu_data')}</Typography>}
@@ -182,14 +205,36 @@ export default function ChartModal({ workload, open, onClose }) {
                 <Box sx={{ height: 300, width: '100%' }}>
                   <LineChart
                     dataset={data.memoryUsage}
-                    series={[{ dataKey: 'y', label: 'Memory', valueFormatter: memValueFormatter, showMark: false }]}
-                    xAxis={[{ dataKey: 'x', scaleType: 'time', valueFormatter: timeFormatter }]}
-                    yAxis={[{ valueFormatter: memValueFormatter, min: memBounds.yMin, max: memBounds.yMax }]}
-                    sx={{ [`.${axisClasses.left} .${axisClasses.label}`]: { transform: 'translate(-10px, 0)' } }}
+                    series={[{ 
+                      dataKey: 'y', 
+                      label: 'Memory', 
+                      valueFormatter: memValueFormatter, 
+                      showMark: false,
+                      area: true,
+                      color: '#818cf8', // Indigo
+                      curve: 'monotoneX',
+                    }]}
+                    xAxis={[{ 
+                      dataKey: 'x', 
+                      scaleType: 'time', 
+                      valueFormatter: timeFormatter,
+                      tickLabelStyle: { fill: '#94a3b8' },
+                    }]}
+                    yAxis={[{ 
+                      valueFormatter: memValueFormatter, 
+                      min: memBounds.yMin, 
+                      max: memBounds.yMax,
+                      tickLabelStyle: { fill: '#94a3b8' },
+                    }]}
+                    grid={{ horizontal: true }}
+                    sx={{ 
+                      [`.${axisClasses.left} .${axisClasses.label}`]: { transform: 'translate(-10px, 0)' },
+                      '.MuiChartsGrid-line': { stroke: 'rgba(255,255,255,0.1) !important' }
+                    }}
                     margin={{ left: 70 }}
                   >
-                    {memReq && ( <ChartsReferenceLine y={memReq} label={t('chart_modal.mem_req_label', { value: formatBytes(memReq, 0) })} labelAlign="start" lineStyle={{ stroke: 'green', strokeDasharray: '4 4' }} labelStyle={{ fill: 'green' }}/> )}
-                    {memLim && ( <ChartsReferenceLine y={memLim} label={t('chart_modal.mem_lim_label', { value: formatBytes(memLim, 0) })} labelAlign="start" lineStyle={{ stroke: 'red', strokeDasharray: '4 4' }} labelStyle={{ fill: 'red' }}/> )}
+                    {memReq && ( <ChartsReferenceLine y={memReq} label={t('chart_modal.mem_req_label', { value: formatBytes(memReq, 0) })} labelAlign="start" lineStyle={{ stroke: '#4ade80', strokeDasharray: '4 4' }} labelStyle={{ fill: '#4ade80' }}/> )}
+                    {memLim && ( <ChartsReferenceLine y={memLim} label={t('chart_modal.mem_lim_label', { value: formatBytes(memLim, 0) })} labelAlign="start" lineStyle={{ stroke: '#f87171', strokeDasharray: '4 4' }} labelStyle={{ fill: '#f87171' }}/> )}
                   </LineChart>
                 </Box>
               ) : <Typography>{t('chart_modal.no_mem_data')}</Typography>}
