@@ -14,3 +14,24 @@
 /backend/backend
 # Lokalna binarka backend
 /backend/server.exe
+
+# Lokalne pliki prezentacyjne (niezwi¹zane z kodem)
+/Go.png
+/alerts.png
+/approvals.png
+/dashboard.png
+/docker.png
+/kubernetes.png
+/login.png
+/mongo_chart.png
+/mongo_edit.png
+/mongo_logo.png
+/pody_na_wezle.png
+/prometheus.png
+/react.png
+/wezly.png
+/workloads.png
+/prezentacja_obrona.html
+/przemowienie_obrona.md
+/pytania_obrona.md
+/opis_projektu_szczegolowy.md
